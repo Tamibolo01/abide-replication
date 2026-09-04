@@ -24,10 +24,16 @@ This module covers the paper's pipeline steps 1-3:
        training subjects only (see connectivity_features).
    One weight per pair of regions is kept, giving n_rois*(n_rois-1)/2
    features per subject for the classifier in experiment.py.
+
+Before any covariance is estimated, every ROI signal is detrended and
+z-scored (standardize_timeseries), as in the paper. This is done here
+explicitly because nilearn's ConnectivityMeasure only standardizes for
+kind="correlation"; for "tangent" and "partial correlation" it uses the
+raw signals, whose amplitude varies across regions and scanners.
 """
 
 import numpy as np
-from nilearn import datasets
+from nilearn import datasets, signal
 from nilearn.connectome import ConnectivityMeasure
 from nilearn.maskers import NiftiLabelsMasker
 
@@ -61,6 +67,17 @@ def drop_constant_rois(timeseries):
         keep &= np.isfinite(ts).all(axis=0)
         keep &= ts.std(axis=0) > 0
     return [ts[:, keep] for ts in timeseries], keep
+
+
+def standardize_timeseries(timeseries):
+    """Detrend and z-score every ROI signal of every subject.
+
+    Removes a linear trend, then scales each region's signal to zero mean
+    and unit variance, so that covariance estimates reflect co-fluctuation
+    rather than signal amplitude. Region amplitude in raw BOLD data depends
+    on tissue, coil sensitivity and scanner, i.e. mostly on the site.
+    """
+    return [signal.clean(ts, detrend=True, standardize="zscore_sample") for ts in timeseries]
 
 
 def make_connectivity_measure(kind="tangent", vectorize=True):
@@ -110,8 +127,10 @@ def connectivity_features(kind, train_timeseries, test_timeseries=None):
     measure : fitted ConnectivityMeasure
     """
     measure = make_connectivity_measure(kind, vectorize=True)
-    X_train = measure.fit_transform(train_timeseries)
-    X_test = None if test_timeseries is None else measure.transform(test_timeseries)
+    X_train = measure.fit_transform(standardize_timeseries(train_timeseries))
+    X_test = None
+    if test_timeseries is not None:
+        X_test = measure.transform(standardize_timeseries(test_timeseries))
     return X_train, X_test, measure
 
 
@@ -122,7 +141,7 @@ def connectivity_matrices(kind, timeseries):
     inside cross-validation; see connectivity_features for that.
     """
     measure = make_connectivity_measure(kind, vectorize=False)
-    return measure.fit_transform(timeseries)
+    return measure.fit_transform(standardize_timeseries(timeseries))
 
 
 def extract_timeseries_from_func(

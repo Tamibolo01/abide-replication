@@ -8,10 +8,12 @@ This module covers the paper's pipeline step 4 (supervised learning) and
 its validation scheme:
 
 - Classifiers, as in the paper: l2-penalised linear SVC, l1-penalised
-  (sparse) linear SVC, and ridge (with its regularisation chosen by
-  internal cross-validation). A "dummy" classifier that draws random labels
-  with the training class frequencies gives the chance level, which is how
-  the paper defines chance.
+  (sparse) linear SVC, and ridge. Regularisation strength is chosen by
+  nested cross-validation on the training fold only (GridSearchCV for the
+  SVCs, RidgeClassifierCV's efficient leave-one-out for ridge), so no test
+  subject influences a hyperparameter. A "dummy" classifier that always
+  predicts the majority class (typical control) gives the chance level;
+  on the full sample that is 53.7%, the figure the paper reports.
 - Two cross-validation schemes:
     "intra": 10-fold, stratified by site x diagnosis, so every fold has the
              same mix of sites and conditions (the paper's intra-site CV);
@@ -39,7 +41,7 @@ from joblib import Parallel, delayed
 from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import RidgeClassifierCV
 from sklearn.metrics import accuracy_score, recall_score
-from sklearn.model_selection import LeaveOneGroupOut, StratifiedKFold
+from sklearn.model_selection import GridSearchCV, LeaveOneGroupOut, StratifiedKFold
 from sklearn.svm import LinearSVC
 
 import connectivity
@@ -48,20 +50,38 @@ import download
 RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 SCHEMES = ("intra", "inter")
 CLASSIFIER_NAMES = ("svc_l2", "svc_l1", "ridge", "dummy")
+SVC_C_GRID = np.logspace(-5, 1, 7)  # 1e-5 ... 10; connectivity features are small numbers
+RIDGE_ALPHA_GRID = np.logspace(-5, 5, 21)
 
 
-def make_classifier(name, random_state=0):
-    """Return a fresh, unfitted classifier by name (see CLASSIFIER_NAMES)."""
+def make_classifier(name, random_state=0, inner_cv=3):
+    """Return a fresh, unfitted classifier by name (see CLASSIFIER_NAMES).
+
+    inner_cv is the number of stratified folds used, inside the training
+    set, to pick the SVC penalty C. Ridge picks alpha by leave-one-out.
+    """
+    inner = StratifiedKFold(n_splits=inner_cv, shuffle=True, random_state=random_state)
     if name == "svc_l2":
-        return LinearSVC(C=1.0, penalty="l2", max_iter=20000, random_state=random_state)
+        svc = LinearSVC(penalty="l2", max_iter=20000, random_state=random_state)
+        return GridSearchCV(svc, {"C": SVC_C_GRID}, cv=inner, n_jobs=1)
     if name == "svc_l1":
         # l1 needs the primal formulation (dual=False).
-        return LinearSVC(C=1.0, penalty="l1", dual=False, max_iter=20000, random_state=random_state)
+        svc = LinearSVC(penalty="l1", dual=False, max_iter=20000, random_state=random_state)
+        return GridSearchCV(svc, {"C": SVC_C_GRID}, cv=inner, n_jobs=1)
     if name == "ridge":
-        return RidgeClassifierCV(alphas=np.logspace(-3, 3, 13))
+        return RidgeClassifierCV(alphas=RIDGE_ALPHA_GRID)
     if name == "dummy":
-        return DummyClassifier(strategy="stratified", random_state=random_state)
+        return DummyClassifier(strategy="most_frequent")
     raise ValueError(f"unknown classifier {name!r}; choose from {CLASSIFIER_NAMES}")
+
+
+def chosen_hyperparameter(clf):
+    """The regularisation value a fitted classifier settled on, or NaN."""
+    if hasattr(clf, "best_params_"):
+        return clf.best_params_["C"]
+    if hasattr(clf, "alpha_"):
+        return float(clf.alpha_)
+    return np.nan
 
 
 def cv_splits(scheme, y, sites, n_splits=10, random_state=0):
@@ -96,7 +116,7 @@ def score(y_true, y_pred):
     }
 
 
-def evaluate_fold(scheme, fold, train, test, timeseries, y, kind, classifiers, random_state=0):
+def evaluate_fold(scheme, fold, train, test, timeseries, y, kind, classifiers, random_state=0, inner_cv=3):
     """Compute features for one fold and score every classifier on it.
 
     Features are computed once per fold and kind and shared by all
@@ -110,7 +130,7 @@ def evaluate_fold(scheme, fold, train, test, timeseries, y, kind, classifiers, r
     )
     rows = []
     for name in classifiers:
-        clf = make_classifier(name, random_state=random_state)
+        clf = make_classifier(name, random_state=random_state, inner_cv=inner_cv)
         clf.fit(X_train, y[train])
         metrics = score(y[test], clf.predict(X_test))
         rows.append(
@@ -121,6 +141,7 @@ def evaluate_fold(scheme, fold, train, test, timeseries, y, kind, classifiers, r
                 "classifier": name,
                 "n_train": len(train),
                 "n_test": len(test),
+                "hyperparameter": chosen_hyperparameter(clf),
                 **metrics,
             }
         )
@@ -135,6 +156,7 @@ def run_experiment(
     classifiers=CLASSIFIER_NAMES,
     schemes=SCHEMES,
     n_splits=10,
+    inner_cv=3,
     n_jobs=1,
     random_state=0,
     verbose=1,
@@ -158,7 +180,7 @@ def run_experiment(
         print(f"Running {len(jobs)} feature-extraction jobs x {len(classifiers)} classifiers ...")
     start = time.time()
     results = Parallel(n_jobs=n_jobs, verbose=verbose)(
-        delayed(evaluate_fold)(scheme, fold, train, test, timeseries, y, kind, classifiers, random_state)
+        delayed(evaluate_fold)(scheme, fold, train, test, timeseries, y, kind, classifiers, random_state, inner_cv)
         for scheme, fold, train, test, kind in jobs
     )
     if verbose:
@@ -179,6 +201,7 @@ def summarize(results):
     pooled = results.assign(correct=results["accuracy"] * results["n_test"]).groupby(keys)
     stats["accuracy_pooled"] = pooled["correct"].sum() / pooled["n_test"].sum()
     stats["n_folds"] = results.groupby(keys).size()
+    stats["hyperparameter_median"] = results.groupby(keys)["hyperparameter"].median()
     return stats.reset_index()
 
 
@@ -224,7 +247,7 @@ def plot_results(summary, path, title="ASD vs. control classification accuracy")
                         ecolor=KIND_COLORS[kind], elinewidth=1.5, capsize=3, label=kind)
         chance = panel[panel["classifier"] == "dummy"]["accuracy_mean"]
         if len(chance):
-            ax.axhline(chance.mean(), color=INK_MUTED, ls="--", lw=1, label="chance (dummy)")
+            ax.axhline(chance.mean(), color=INK_MUTED, ls="--", lw=1, label="chance (majority class)")
         ax.set_title(labels.get(scheme, scheme), color=INK, fontsize=11)
         ax.set_xticks(range(len(classifiers)))
         ax.set_xticklabels(classifiers, color=INK)
@@ -258,6 +281,8 @@ def main():
     parser.add_argument("--classifiers", nargs="+", default=list(CLASSIFIER_NAMES), choices=CLASSIFIER_NAMES)
     parser.add_argument("--schemes", nargs="+", default=list(SCHEMES), choices=SCHEMES)
     parser.add_argument("--n-splits", type=int, default=10, help="Folds for intra-site CV.")
+    parser.add_argument("--inner-cv", type=int, default=3,
+                        help="Inner folds for choosing the SVC penalty on the training set (default: 3).")
     parser.add_argument("--n-jobs", type=int, default=1, help="Parallel workers (-1 = all cores).")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
@@ -279,8 +304,8 @@ def main():
           f"{keep.sum()} of {len(keep)} ROIs kept -> {keep.sum() * (keep.sum() - 1) // 2} features")
 
     results = run_experiment(timeseries, y, sites, kinds=args.kinds, classifiers=args.classifiers,
-                             schemes=args.schemes, n_splits=args.n_splits, n_jobs=args.n_jobs,
-                             random_state=args.seed)
+                             schemes=args.schemes, n_splits=args.n_splits, inner_cv=args.inner_cv,
+                             n_jobs=args.n_jobs, random_state=args.seed)
     summary = summarize(results)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -293,7 +318,7 @@ def main():
 
     pd.set_option("display.width", 160)
     show = summary[["cv_scheme", "connectivity", "classifier", "accuracy_mean", "accuracy_std",
-                    "accuracy_pooled", "sensitivity_mean", "specificity_mean"]]
+                    "accuracy_pooled", "sensitivity_mean", "specificity_mean", "hyperparameter_median"]]
     print(show.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
 
 

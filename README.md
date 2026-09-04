@@ -68,7 +68,7 @@ pip install -r requirements.txt
 # 1. Download Harvard-Oxford ROI time series for all 871 subjects (~200 MB)
 python src/download.py
 
-# 2. Run the full experiment (about 10 minutes on 8 cores)
+# 2. Run the full experiment (about 40 minutes on 8 cores; --inner-cv 2 roughly halves it)
 python src/experiment.py --n-jobs -1
 
 # Quick two-site test (under a minute)
@@ -86,46 +86,49 @@ accuracy pooled over test subjects) and `<atlas>_n<N>_accuracy.png`.
 ## Results
 
 Full run on all 871 subjects, Harvard-Oxford atlas (101 regions kept,
-5050 pairwise features), seed 0, about 10 minutes on 8 cores. Accuracy is
-the mean over folds (± std); "pooled" counts correct predictions over all
-test subjects, which matters for leave-one-site-out because sites differ in
-size.
+5050 pairwise features), seed 0, 3 inner folds, about 42 minutes on 8
+cores. Accuracy is the mean over folds (± std); "pooled" counts correct
+predictions over all test subjects, which matters for leave-one-site-out
+because sites differ in size. Chance is the majority-class rate, 53.7%.
 
 | Validation | Connectivity | Classifier | Accuracy | Pooled | Sensitivity | Specificity |
 |---|---|---|---|---|---|---|
-| Intra-site (10-fold) | correlation | ridge | **0.673 ± 0.054** | 0.673 | 0.601 | 0.734 |
-| Intra-site | tangent | ridge | 0.662 ± 0.043 | 0.662 | 0.576 | 0.737 |
-| Intra-site | correlation | svc_l2 | 0.647 ± 0.048 | 0.648 | 0.607 | 0.681 |
-| Intra-site | tangent | svc_l2 | 0.645 ± 0.037 | 0.645 | 0.566 | 0.713 |
-| Intra-site | partial correlation | ridge | 0.605 ± 0.030 | 0.605 | 0.495 | 0.702 |
-| Intra-site | any | dummy (chance) | 0.576 ± 0.058 | 0.576 | 0.538 | 0.610 |
-| Inter-site (leave-one-site-out) | tangent | ridge | **0.637 ± 0.075** | 0.658 | 0.581 | 0.691 |
-| Inter-site | correlation | ridge | 0.631 ± 0.125 | 0.658 | 0.596 | 0.668 |
-| Inter-site | tangent | svc_l2 | 0.610 ± 0.098 | 0.639 | 0.566 | 0.655 |
-| Inter-site | correlation | svc_l2 | 0.610 ± 0.100 | 0.631 | 0.573 | 0.649 |
-| Inter-site | partial correlation | ridge | 0.596 ± 0.069 | 0.611 | 0.477 | 0.705 |
-| Inter-site | any | dummy (chance) | 0.518 ± 0.060 | 0.513 | 0.635 | 0.423 |
+| Inter-site (leave-one-site-out) | tangent | ridge | **0.651 ± 0.112** | **0.679** | 0.591 | 0.706 |
+| Inter-site | tangent | svc_l2 | 0.645 ± 0.108 | 0.673 | 0.578 | 0.706 |
+| Inter-site | correlation | ridge | 0.639 ± 0.110 | 0.666 | 0.609 | 0.671 |
+| Inter-site | correlation | svc_l2 | 0.632 ± 0.092 | 0.657 | 0.605 | 0.664 |
+| Inter-site | partial correlation | ridge | 0.609 ± 0.091 | 0.619 | 0.511 | 0.701 |
+| Inter-site | tangent | svc_l1 | 0.603 ± 0.090 | 0.615 | 0.539 | 0.668 |
+| Inter-site | any | chance (majority) | 0.540 ± 0.085 | 0.537 | 0.000 | 1.000 |
+| Intra-site (10-fold) | correlation | svc_l2 | **0.680 ± 0.050** | 0.680 | 0.609 | 0.741 |
+| Intra-site | tangent | ridge | 0.679 ± 0.047 | 0.679 | 0.589 | 0.756 |
+| Intra-site | tangent | svc_l2 | 0.675 ± 0.055 | 0.675 | 0.591 | 0.748 |
+| Intra-site | correlation | ridge | 0.670 ± 0.050 | 0.670 | 0.606 | 0.726 |
+| Intra-site | correlation | svc_l1 | 0.628 ± 0.050 | 0.628 | 0.554 | 0.690 |
+| Intra-site | partial correlation | svc_l2 | 0.594 ± 0.032 | 0.594 | 0.424 | 0.740 |
+| Intra-site | any | chance (majority) | 0.537 ± 0.016 | 0.537 | 0.000 | 1.000 |
 
-All 24 pipeline/classifier combinations are in `results/ho_n871_summary.csv`
-and the figure is `results/ho_n871_accuracy.png` (regenerate with the
-commands above; `results/` is not versioned).
+All 24 pipeline/classifier combinations, with the chosen regularisation
+values, are in `results/ho_n871_summary.csv`; the figure is
+`results/ho_n871_accuracy.png` (regenerate with the commands above;
+`results/` is not versioned).
 
 How this compares with the paper:
 
 - **Inter-site prediction works.** Every real classifier beats chance on
-  unseen sites. The best pooled inter-site accuracy, 65.8%, is close to the
-  paper's best of 66.8% (chance 53.7%), obtained with its data-driven MSDL
+  unseen sites. The best pooled inter-site accuracy, 67.9%, matches the
+  paper's best of 66.8% (chance 53.7%), which used its data-driven MSDL
   atlas; the paper reports reference atlases performing near that level.
-- **Ridge and l2-SVC are the best classifiers; l1-SVC is worse**, as in the
-  paper, where sparse models and feature selection hurt.
+- **Tangent embedding with an l2-regularised classifier (ridge or SVC) is
+  the best inter-site pipeline**, the paper's headline methodological
+  result. Intra-site, tangent and plain correlation are within a point of
+  each other.
+- **Ridge and l2-SVC beat l1-SVC** everywhere, as in the paper, where sparse
+  models and feature selection hurt.
 - **Partial correlation is the worst connectivity measure**, as in the
   paper, which attributes this to the short ABIDE scans.
-- **Tangent embedding and plain correlation are roughly tied here**, whereas
-  the paper found tangent best. The gap likely comes from the departures
-  listed below (no nested hyperparameter search, no region-level nuisance
-  regression, full rather than 84-region Harvard-Oxford).
 - **Inter-site scores vary more across folds than intra-site ones**, as the
-  paper notes; the std doubles for most pipelines.
+  paper notes; the std roughly doubles.
 
 ## Departures from the paper
 
@@ -136,10 +139,29 @@ How this compares with the paper:
   the full atlas.
 - **Region-level nuisance regression.** The paper regressed CompCor and
   motion components out of the ROI signals; the PCP time series come without
-  that step.
-- **Hyperparameters.** The paper used nested cross-validation. Here the SVCs
-  use C=1 and ridge picks its penalty by internal leave-one-out CV.
+  that step. Signals are detrended and z-scored here, as in the paper.
+- **Hyperparameters.** Both tune regularisation by nested cross-validation
+  on the training fold; the grids and inner-fold count (3 by default,
+  `--inner-cv`) are this project's choices.
 - **Sites.** Leave-one-site-out uses the 20 site identifiers in the
   phenotypic file (some institutions appear as two sub-sites), not 17.
 - **Software.** Python 3.12, nilearn 0.14, scikit-learn 1.8, versus the
   paper's Python 2.7, nilearn 0.1.5, scikit-learn 0.17.
+
+## Checking the pipeline against the paper
+
+A first version of this pipeline found tangent embedding and plain
+correlation tied, whereas the paper found tangent best. Before blaming the
+paper departures, the pipeline itself was audited on the full sample, same
+folds, one change at a time (script not kept; results summarised here):
+
+| Suspect | Finding | Verdict |
+|---|---|---|
+| Signals not standardized before covariance | nilearn's `ConnectivityMeasure` applies `standardize` only for `kind="correlation"`; tangent and partial correlation were fed raw BOLD amplitudes. Explicit detrend + z-score raised tangent accuracy by 1–2 points in both schemes and made it the best measure. | Bug, fixed |
+| Fixed SVC penalty C=1 | C=0.01 beat C=1 by about 3 points for tangent features, which are small numbers. | Bug, fixed with nested CV |
+| Chance level | A random-label dummy gave about 51%; the paper's 53.7% is the majority-class rate (468/871). | Wrong baseline, fixed |
+| Diagonal discarded from tangent matrices | Keeping the diagonal lowered accuracy slightly. | Kept as is |
+| Ridge alpha grid too narrow | Chosen alphas (about 30–100) sat well inside the grid. | Not an issue |
+
+The results above are from the corrected pipeline.
+
