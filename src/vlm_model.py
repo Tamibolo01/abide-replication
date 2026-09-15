@@ -3,8 +3,10 @@ vlm_model.py -- pipeline B, step 3: the model, the losses, the training loop.
 
 Two towers: DINOv2 for pictures, Bio_ClinicalBERT (+ LoRA) for text, each
 projected into the same 256-d space. Training = three matching games on a
-batch of 32: picture <-> report (CLIP), picture <-> another picture of the
-same scan (multi-view), patches <-> sentences (local alignment). forward()
+batch of 32: picture <-> report (CLIP), picture <-> a second augmented copy
+of itself (MaMA's multi-view loss; --pair-mode can make the copy another
+slice of the same scan instead), patches <-> sentences (local alignment).
+--vv-weight 0 drops the picture-to-picture term altogether. forward()
 adds them up; fit() is the loop. embed_images() / embed_reports() are what
 the evaluation uses afterwards. SliceClassifier + fit_classifier are the
 full-fine-tuning baseline.
@@ -24,10 +26,12 @@ for fMRI slices (see vlm_reports.py for the text side and vlm_slices.py for the
 images):
 
 1. Multi-view supervision. Each mammogram is paired not only with its
-   report but also with another view of the same breast (CC / MLO). Here
-   the "study" is one subject's resting-state recording and the second view
-   is another slice of it: the same cut at a different time point, or a
-   different plane at the same time point.
+   report but also with another view of the same breast (CC / MLO); when a
+   study has a single image, MaMA uses an augmented copy of it as the second
+   view. That single-image case is the default here: one slice per example,
+   and the second view is the same slice under a different random
+   augmentation. Optionally (vlm_experiment --pair-mode time/plane/any) the
+   second view is another slice of the same recording instead.
 2. Multi-scale alignment. Besides the global image-report contrastive loss,
    a symmetric local alignment (SLA) loss matches image *patches* with
    report *sentences*, so that small regions can be tied to specific
@@ -298,8 +302,12 @@ class MaMA(nn.Module):
             "local_mask": mask.to(hidden.device),
         }
 
-    def forward(self, view1, view2, text, local_weight=1.0):
-        """All MaMA losses for a batch; returns a dict including "total"."""
+    def forward(self, view1, view2, text, local_weight=1.0, vv_weight=1.0):
+        """All MaMA losses for a batch; returns a dict including "total".
+
+        view2 is the second view of the same study: by default an
+        independently augmented copy of view1 (see vlm_experiment.PairDataset).
+        """
         v1 = self.encode_image(view1)
         v2 = self.encode_image(view2)
         t = self.encode_text(text["input_ids"], text["attention_mask"])
@@ -316,7 +324,7 @@ class MaMA(nn.Module):
             )
         else:
             losses["local"] = torch.zeros((), device=view1.device)
-        losses["total"] = losses["vv"] + losses["vt1"] + losses["vt2"] + local_weight * losses["local"]
+        losses["total"] = vv_weight * losses["vv"] + losses["vt1"] + losses["vt2"] + local_weight * losses["local"]
         return losses
 
 
@@ -372,6 +380,7 @@ def fit(
     warmup_frac=0.1,
     local_start_frac=0.2,
     local_weight=1.0,
+    vv_weight=1.0,
     image_size=DEFAULT_IMAGE_SIZE,
     device=None,
     seed=0,
@@ -379,6 +388,8 @@ def fit(
     verbose=1,
 ):
     """Contrastive pre-training of a MaMA model on a PairDataset.
+
+    vv_weight scales the picture-to-picture loss (0 switches it off).
 
     Returns
     -------
@@ -410,7 +421,7 @@ def fit(
             text = model.tokenize(batch["reports"]).to(device)
             weight = local_weight if step >= local_start else 0.0
             with autocast(device):
-                losses = model(view1, view2, text, local_weight=weight)
+                losses = model(view1, view2, text, local_weight=weight, vv_weight=vv_weight)
             optimizer.zero_grad(set_to_none=True)
             losses["total"].backward()
             torch.nn.utils.clip_grad_norm_(parameters, 1.0)

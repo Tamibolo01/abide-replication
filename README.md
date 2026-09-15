@@ -205,7 +205,7 @@ because all 871 would need 87 GB.
 |---|---|
 | Image: one mammogram (518 px) | One slice of one time point (76 px, fed at 140 px) |
 | Report generated from tabular fields by a clinical template; meta keywords masked with p=0.8 | Report generated from the phenotypic table by the same segment structure (procedure, patient, image, cognition, findings, impression, assessment); site, age, sex, handedness, eye status and IQ masked with p=0.8; findings (diagnosis, DSM-IV-TR subtype, ADOS) never masked |
-| Multi-view: CC and MLO of the same breast are positives | The same cut at another time point, or another plane at the same time point, of the same recording |
+| Multi-view: CC and MLO of the same breast are positives; a single-image study uses an augmented copy | One slice per example; the second view is an augmented copy of the same slice (MaMA's single-image case). `--pair-mode time/plane/any` pairs another slice of the same recording instead; `--vv-weight 0` drops the loss |
 | Multi-scale: global CLIP loss + symmetric local alignment (patches ↔ sentences) | Same, with sentence embeddings read at each `[SEP]` |
 | DINOv2 ViT-B/14, fully fine-tuned | DINOv2 ViT-S/14 by default (`--image-model facebook/dinov2-base` for the paper's size), with gradient checkpointing |
 | BioMedLM 2.7B with LoRA (BioClinicalBERT as smaller baseline) | Bio_ClinicalBERT with LoRA (rank 8 on query/value), base frozen |
@@ -298,9 +298,12 @@ above is the reference to beat (67.9% pooled inter-site accuracy).
 - **No real reports.** ABIDE has no radiology reports; the reports are
   templated from the phenotypic table, as MaMA's are from its tabular
   fields, but the vocabulary is much narrower.
-- **The second view is a different instant or plane**, not a different
-  projection of the same object at the same instant, since a single fMRI
-  time point has no second acquisition.
+- **One image per example.** MaMA pairs the two X-ray projections of a
+  breast; a single fMRI time point has no second acquisition, so the
+  default follows MaMA's single-image case, an augmented copy of the same
+  slice. Pairing another frame or plane of the same recording is
+  available (`--pair-mode`), but then the report describes only the
+  first picture.
 - **Validation** follows this project's subject-level CV rather than
   MaMA's fixed train/test split.
 

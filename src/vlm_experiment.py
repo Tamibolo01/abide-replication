@@ -72,7 +72,7 @@ import vlm_slices
 import vlm_model
 
 METHODS = ("zeroshot", "linear", "finetune")
-PAIR_MODES = ("any", "time", "plane")
+PAIR_MODES = ("self", "time", "plane", "any")
 PROBE_C_GRID = np.logspace(-4, 2, 7)
 RESULTS_DIR = connectivity_experiment.RESULTS_DIR
 
@@ -80,14 +80,20 @@ RESULTS_DIR = connectivity_experiment.RESULTS_DIR
 class PairDataset(torch.utils.data.Dataset):
     """Every slice of the training subjects, with a second view and a report.
 
-    An item is (subject, plane, time point, slice). The second view of the
-    same recording is, per ``pair_mode``: "time", the same cut at another
-    time point; "plane", a random cut of another plane at the same time
-    point; "any", one of the two at random. The report is regenerated at
-    every access so that the meta-information masking is re-drawn.
+    An item is (subject, plane, time point, slice). The report describes
+    that slice. The second view, per ``pair_mode``:
+      "self"   the same slice again; the random augmentation in vlm_model.fit
+               makes the two copies differ. One image per example, which is
+               what MaMA does for a study with a single image. Default.
+      "time"   the same cut at another time point of the recording;
+      "plane"  a random cut of another plane at the same time point;
+      "any"    "time" or "plane" at random.
+    With "time", "plane" and "any" the report still describes the first
+    view only. The report is regenerated at every access so that the
+    meta-information masking is re-drawn.
     """
 
-    def __init__(self, banks, rows, file_ids, planes, pair_mode="any", mask_prob=vlm_reports.MASK_PROB, seed=0):
+    def __init__(self, banks, rows, file_ids, planes, pair_mode="self", mask_prob=vlm_reports.MASK_PROB, seed=0):
         if pair_mode not in PAIR_MODES:
             raise ValueError(f"pair_mode must be one of {PAIR_MODES}, got {pair_mode!r}")
         self.banks, self.rows, self.planes = banks, rows, list(planes)
@@ -111,7 +117,9 @@ class PairDataset(torch.utils.data.Dataset):
         mode = self.pair_mode
         if mode == "any":
             mode = "time" if self.rng.random() < 0.5 else "plane"
-        if mode == "time" and n_timepoints > 1:
+        if mode == "self":
+            view2 = bank[plane][t, s]
+        elif mode == "time" and n_timepoints > 1:
             t2 = (t + self.rng.integers(1, n_timepoints)) % n_timepoints
             view2 = bank[plane][t2, s]
         else:
@@ -246,6 +254,7 @@ def run_fold(args, scheme, fold, train, test, file_ids, rows, banks, y, device):
         history = vlm_model.fit(model, dataset, steps=args.steps, batch_size=args.batch_size, lr=args.lr,
                           weight_decay=args.weight_decay, warmup_frac=args.warmup_frac,
                           local_start_frac=args.local_start_frac, local_weight=args.local_weight,
+                          vv_weight=args.vv_weight,
                           image_size=args.image_size, device=device, seed=args.seed, log_every=args.log_every)
         for record in history:
             record.update(cv_scheme=scheme, fold=fold)
@@ -314,8 +323,9 @@ def main():
     data.add_argument("--sites", nargs="+", default=None, metavar="SITE_ID", help="Restrict to these sites.")
     data.add_argument("--n-subjects", type=int, default=None, help="Use only the first N subjects (in ID order).")
     data.add_argument("--planes", nargs="+", default=list(vlm_slices.PLANES), choices=vlm_slices.PLANES)
-    data.add_argument("--pair-mode", default="any", choices=PAIR_MODES,
-                      help="How the second view is drawn from the same recording (default: any).")
+    data.add_argument("--pair-mode", default="self", choices=PAIR_MODES,
+                      help="Second view for the picture-to-picture loss: self = an augmented copy of the same slice "
+                           "(default, one image per example); time / plane / any = another slice of the same recording.")
     data.add_argument("--mask-prob", type=float, default=vlm_reports.MASK_PROB,
                       help="Meta-information masking probability in the reports (default: 0.8, as MaMA).")
     data.add_argument("--n-timepoints-eval", type=int, default=4,
@@ -352,6 +362,8 @@ def main():
     train.add_argument("--local-start-frac", type=float, default=0.2,
                        help="Fraction of steps before the local alignment loss is switched on (default: 0.2, as MaMA's 8k/40k).")
     train.add_argument("--local-weight", type=float, default=1.0)
+    train.add_argument("--vv-weight", type=float, default=1.0,
+                       help="Weight of the picture-to-picture loss (default: 1.0; 0 = plain CLIP + local alignment).")
     train.add_argument("--finetune-steps", type=int, default=500, help="Steps for the finetune evaluation.")
     train.add_argument("--finetune-lr", type=float, default=2e-5)
     train.add_argument("--log-every", type=int, default=50)
