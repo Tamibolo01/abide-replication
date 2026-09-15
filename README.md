@@ -57,6 +57,7 @@ src/
   vlm_model.py      # VLM: MaMA-style model, losses, training loop
   vlm_experiment.py # VLM: cross-validated ASD vs. control classification
 results/            # gitignored: per-fold CSV, summary CSV, figure
+cluster/            # Slurm scripts and guide for running on Yale's Bouchet cluster
 notebooks/          # exploratory work (empty so far)
 requirements.txt    # pinned package versions
 ```
@@ -68,6 +69,8 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+To run on Yale's Bouchet cluster instead, see [cluster/README.md](cluster/README.md).
 
 ## Running
 
