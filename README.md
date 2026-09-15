@@ -242,8 +242,9 @@ python src/vlm_experiment.py --steps 0 --eval linear
 
 On an M1 Pro (16 GB) a pre-training step at 140 px and batch 32 takes about
 1.5 s, so 1000 steps are about 25 minutes per fold. `--folds` runs a subset
-of folds; results are written after every fold. See `--help` for the model,
-loss and schedule options.
+of folds; results are written after every fold. On a GPU with memory to
+spare, `--no-grad-checkpointing` is about 30% faster. See `--help` for the
+model, loss and schedule options.
 
 Outputs in `results/`: `vlm_<tag>_folds.csv` (one row per fold and
 protocol, with accuracy, balanced accuracy, AUC, sensitivity, specificity),

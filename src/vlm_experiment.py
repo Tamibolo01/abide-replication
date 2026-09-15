@@ -235,7 +235,7 @@ def build_model(args):
     torch.manual_seed(args.seed)
     return vlm_model.MaMA(image_model=args.image_model, text_model=args.text_model, proj_dim=args.proj_dim,
                     lora_rank=args.lora_rank, tau_vv=args.tau_vv, tau_local=args.tau_local,
-                    freeze_image=args.freeze_image)
+                    freeze_image=args.freeze_image, grad_checkpointing=not args.no_grad_checkpointing)
 
 
 def run_fold(args, scheme, fold, train, test, file_ids, rows, banks, y, device):
@@ -352,6 +352,9 @@ def main():
     model.add_argument("--tau-vv", type=float, default=0.1)
     model.add_argument("--tau-local", type=float, default=0.1)
     model.add_argument("--freeze-image", action="store_true", help="Do not fine-tune the image encoder.")
+    model.add_argument("--no-grad-checkpointing", action="store_true",
+                       help="Store activations instead of recomputing them: ~30%% faster, several times the memory. "
+                            "Use on a GPU with room to spare (the default fits a 16 GB laptop).")
 
     train = parser.add_argument_group("pre-training")
     train.add_argument("--steps", type=int, default=1000, help="Pre-training steps per fold (default: 1000; 0 = none).")
