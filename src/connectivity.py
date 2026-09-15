@@ -1,4 +1,17 @@
 """
+connectivity.py -- pipeline A, paper steps 1-3: region signals -> features.
+
+Input is one table per subject (rows = time points, columns = ~100 regions).
+Output is one row of 5,050 numbers per subject: for every pair of regions,
+how much the two signals move together. Three ways to measure that
+(correlation / partial correlation / tangent) because the paper compares them.
+Not run on its own; connectivity_experiment.py calls connectivity_features()
+once per fold. That function is the one to read: it fits the measure on the
+training subjects only, which is what keeps the tangent version leak-free.
+standardize_timeseries() is the bug fix from the audit in the README.
+
+Technical notes
+---------------
 Build functional connectivity matrices from ROI time series.
 
 Replication target: Abraham et al. 2017, "Deriving reproducible biomarkers
@@ -23,7 +36,7 @@ This module covers the paper's pipeline steps 1-3:
        covariance. This depends on the group, so it must be fitted on
        training subjects only (see connectivity_features).
    One weight per pair of regions is kept, giving n_rois*(n_rois-1)/2
-   features per subject for the classifier in experiment.py.
+   features per subject for the classifier in connectivity_experiment.py.
 
 Before any covariance is estimated, every ROI signal is detrended and
 z-scored (standardize_timeseries), as in the paper. This is done here

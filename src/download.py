@@ -1,4 +1,18 @@
 """
+download.py -- getting the data. Used by both pipelines.
+
+Only file that touches the internet. nilearn pulls the ABIDE files into data/
+the first time and reads from disk after that, so re-running is cheap.
+Two things every experiment needs come out of here: each subject's diagnosis
+(DX_GROUP 1 = autism, 2 = control in the raw table; phenotypic_targets turns
+that into 1/0) and the site that scanned them.
+fetch_roi_timeseries() -> the small per-region signal tables (pipeline A).
+fetch_abide(derivatives=("func_preproc",)) -> the full 4D scans, 100 MB each
+(pipeline B; vlm_slices.py handles those one subject at a time).
+`python src/download.py` downloads the region signals for all 871 subjects.
+
+Technical notes
+---------------
 Fetch ABIDE (Autism Brain Imaging Data Exchange) resting-state data via nilearn.
 
 Replication target: Abraham et al. 2017, "Deriving reproducible biomarkers
@@ -16,7 +30,7 @@ Two kinds of derivative are useful here:
 1. ``rois_<atlas>`` -- ROI time series that the PCP already extracted with a
    reference atlas (Harvard-Oxford, Craddock 200, ...). These are ~200 KB per
    subject, so the full quality-checked sample (871 subjects, the same N as
-   the paper) is ~200 MB. This is what the replication in experiment.py uses:
+   the paper) is ~200 MB. This is what the replication in connectivity_experiment.py uses:
    it corresponds to the paper's pipeline with a *reference* atlas, i.e. steps
    1-2 (region definition, time-series extraction) done once by the PCP.
 2. ``func_preproc`` -- the preprocessed 4D volumes (~100 MB per subject).
@@ -158,7 +172,7 @@ def phenotypic_targets(phenotypic):
     y : numpy.ndarray of int
         1 for autism spectrum disorder (ABIDE DX_GROUP == 1), 0 for typical
         control (DX_GROUP == 2). ASD is the "positive" class, so sensitivity
-        in experiment.py means the fraction of ASD subjects detected.
+        in connectivity_experiment.py means the fraction of ASD subjects detected.
     sites : numpy.ndarray of str
         Acquisition site of each subject (SITE_ID), used for site-stratified
         and leave-one-site-out cross-validation.

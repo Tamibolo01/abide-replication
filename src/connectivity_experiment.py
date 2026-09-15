@@ -1,4 +1,16 @@
 """
+connectivity_experiment.py -- pipeline A, paper step 4 plus the validation.
+
+The script I actually run. Splits subjects into train/test (random folds, or
+one whole site held out), builds connectivity features for each side, trains
+the linear classifiers on train, scores on test, writes CSVs and a figure to
+results/. main() at the bottom reads top to bottom as the whole story;
+evaluate_fold() is the unit of work.
+`python src/connectivity_experiment.py --n-jobs -1` for the full thing (~40
+min); add --sites PITT OLIN --n-splits 5 for a one-minute check.
+
+Technical notes
+---------------
 Cross-validation and scoring for the ASD vs. control classification task.
 
 Replication target: Abraham et al. 2017, "Deriving reproducible biomarkers
@@ -27,7 +39,7 @@ Connectivity features are recomputed inside every fold from training
 subjects only (see connectivity.connectivity_features), which is what makes
 the tangent-space results leak-free.
 
-Run ``python src/experiment.py --help`` for the command-line options.
+Run ``python src/connectivity_experiment.py --help`` for the command-line options.
 Results (per-fold CSV, summary CSV, figure) land in results/ (gitignored).
 """
 
@@ -123,6 +135,7 @@ def evaluate_fold(scheme, fold, train, test, timeseries, y, kind, classifiers, r
     classifiers, because feature extraction (not classification) dominates
     the run time.
     """
+    # (a) Features, fitted on the training subjects only and then applied to the test subjects.
     X_train, X_test, _ = connectivity.connectivity_features(
         kind,
         [timeseries[i] for i in train],
@@ -130,8 +143,10 @@ def evaluate_fold(scheme, fold, train, test, timeseries, y, kind, classifiers, r
     )
     rows = []
     for name in classifiers:
+        # (b) Train one classifier on the training subjects ...
         clf = make_classifier(name, random_state=random_state, inner_cv=inner_cv)
         clf.fit(X_train, y[train])
+        # (c) ... and score its predictions for the test subjects it has never seen.
         metrics = score(y[test], clf.predict(X_test))
         rows.append(
             {
@@ -288,6 +303,8 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
     args = parser.parse_args()
 
+    # Step 1 of 4: load the region signals (one table per subject) and the subject
+    # table; turn the latter into labels (1 = autism, 0 = control) and site names.
     filters = {"SITE_ID": args.sites} if args.sites else {}
     timeseries, phenotypic = download.fetch_roi_timeseries(
         args.atlas, n_subjects=args.n_subjects, verbose=0, **filters
@@ -298,14 +315,18 @@ def main():
             "Only one diagnostic group in the selected subjects (subjects are ordered by ID, "
             "so a small --n-subjects can be all ASD). Use more subjects or --sites."
         )
+    # Step 2 of 4: drop brain regions that some scanners never captured.
     timeseries, keep = connectivity.drop_constant_rois(timeseries)
     print(f"{len(timeseries)} subjects from {len(np.unique(sites))} sites; "
           f"{int(y.sum())} ASD / {int((y == 0).sum())} TC; "
           f"{keep.sum()} of {len(keep)} ROIs kept -> {keep.sum() * (keep.sum() - 1) // 2} features")
 
+    # Step 3 of 4: for every split of the subjects, every connectivity measure and every
+    # classifier, train on the training subjects and score the test subjects.
     results = run_experiment(timeseries, y, sites, kinds=args.kinds, classifiers=args.classifiers,
                              schemes=args.schemes, n_splits=args.n_splits, inner_cv=args.inner_cv,
                              n_jobs=args.n_jobs, random_state=args.seed)
+    # Step 4 of 4: average over folds, save the tables and the figure, print a summary.
     summary = summarize(results)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)

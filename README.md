@@ -1,5 +1,8 @@
 # ABIDE Replication
 
+New to the code? Start with [GUIDE.md](GUIDE.md), a plain-language tour of
+the two approaches, the files and the vocabulary.
+
 A partial replication of:
 
 > Abraham, A., Milham, M. P., Di Martino, A., Craddock, R. C., Samaras, D.,
@@ -48,7 +51,11 @@ data/               # gitignored, ABIDE downloads land here (~2 GB currently)
 src/
   download.py       # fetch ABIDE via nilearn; phenotypic -> labels and sites
   connectivity.py   # ROI time series -> connectivity features (steps 1-3)
-  experiment.py     # cross-validation, scoring, results (step 4 + validation)
+  connectivity_experiment.py  # cross-validation, scoring, results (step 4 + validation)
+  vlm_slices.py     # VLM: 2D slices at single time points of the 4D volumes
+  vlm_reports.py    # VLM: template reports from the phenotypic table
+  vlm_model.py      # VLM: MaMA-style model, losses, training loop
+  vlm_experiment.py # VLM: cross-validated ASD vs. control classification
 results/            # gitignored: per-fold CSV, summary CSV, figure
 notebooks/          # exploratory work (empty so far)
 requirements.txt    # pinned package versions
@@ -69,10 +76,10 @@ pip install -r requirements.txt
 python src/download.py
 
 # 2. Run the full experiment (about 40 minutes on 8 cores; --inner-cv 2 roughly halves it)
-python src/experiment.py --n-jobs -1
+python src/connectivity_experiment.py --n-jobs -1
 
 # Quick two-site test (under a minute)
-python src/experiment.py --sites PITT OLIN --n-splits 5
+python src/connectivity_experiment.py --sites PITT OLIN --n-splits 5
 ```
 
 Useful options: `--atlas cc200` (Craddock 200 instead of Harvard-Oxford;
@@ -164,4 +171,136 @@ folds, one change at a time (script not kept; results summarised here):
 | Ridge alpha grid too narrow | Chosen alphas (about 30–100) sat well inside the grid. | Not an issue |
 
 The results above are from the corrected pipeline.
+
+## A second model: vision-language model on single-time-point slices
+
+`src/vlm_slices.py`, `src/vlm_reports.py`, `src/vlm_model.py` and `src/vlm_experiment.py`
+implement a different approach to the same ASD vs. control task, modelled
+on:
+
+> Du, Y., Onofrey, J., & Dvornek, N. C. (2024). Multi-view and multi-scale
+> alignment for contrastive language-image pre-training in mammography
+> (MaMA). *IPMI 2025*. https://arxiv.org/abs/2409.18119
+
+Instead of connectivity between regions, the visual input is a **2D slice
+of a single time point** of the preprocessed 4D fMRI, and the model is a
+CLIP-style vision-language model (VLM) trained to match such slices with a
+text report about the subject.
+
+### What the model sees
+
+C-PAC's `func_preproc` volumes are residuals after nuisance regression, so
+every voxel has zero mean over time. One volume is therefore not anatomy
+but a map of where the BOLD signal is above or below its mean at that
+instant, inside the brain mask. `vlm_slices.py` scales each volume by its
+in-mask standard deviation, clips at ±3, and stores 16 evenly spaced time
+points × 3 planes (axial, coronal, sagittal) × 7 slices through the central
+60% of the brain as 76×76 uint8 images (about 0.6 MB per subject). The
+100 MB volumes are downloaded one at a time and deleted after slicing,
+because all 871 would need 87 GB.
+
+### How MaMA's ingredients map onto ABIDE
+
+| MaMA (mammography) | Here (resting-state fMRI) |
+|---|---|
+| Image: one mammogram (518 px) | One slice of one time point (76 px, fed at 140 px) |
+| Report generated from tabular fields by a clinical template; meta keywords masked with p=0.8 | Report generated from the phenotypic table by the same segment structure (procedure, patient, image, cognition, findings, impression, assessment); site, age, sex, handedness, eye status and IQ masked with p=0.8; findings (diagnosis, DSM-IV-TR subtype, ADOS) never masked |
+| Multi-view: CC and MLO of the same breast are positives | The same cut at another time point, or another plane at the same time point, of the same recording |
+| Multi-scale: global CLIP loss + symmetric local alignment (patches ↔ sentences) | Same, with sentence embeddings read at each `[SEP]` |
+| DINOv2 ViT-B/14, fully fine-tuned | DINOv2 ViT-S/14 by default (`--image-model facebook/dinov2-base` for the paper's size), with gradient checkpointing |
+| BioMedLM 2.7B with LoRA (BioClinicalBERT as smaller baseline) | Bio_ClinicalBERT with LoRA (rank 8 on query/value), base frozen |
+| Loss = L_VV + L_VT(v,t) + L_VT(ṽ,t) + w·L_local, w=0 for the first 8k of 40k steps | Same, w=0 for the first 20% of steps |
+| AdamW, lr 4e-5, wd 0.1, cosine schedule, bf16 | Same (bf16 on CUDA only; float32 on Apple MPS) |
+| Zero-shot with meta information in the prompts; linear probe; full fine-tuning | Same three protocols |
+
+Because the training reports contain the diagnosis, pre-training is
+supervised. What makes it honest is that everything happens inside the
+cross-validation of `connectivity_experiment.py` (10-fold site-stratified or
+leave-one-site-out), split **by subject**: the model is trained on the
+training subjects' slices and reports and then scored on the held-out
+subjects, one score per subject obtained by averaging over that subject's
+slices. Zero-shot classification compares the image embedding with two
+candidate reports that share the subject's meta information and differ
+only in the findings.
+
+### Running
+
+```bash
+pip install -r requirements.txt          # now includes torch, transformers, peft
+
+# 1. Build the slice bank (downloads 100 MB per subject, ~30 s each; deletes the volume afterwards)
+python src/vlm_slices.py --sites PITT        # 50 subjects, ~15 minutes
+python src/vlm_slices.py                     # all 871 subjects, several hours and 87 GB of transfer
+
+# 2. Train and evaluate (per fold: pre-training, then zero-shot and linear probe on the test subjects)
+python src/vlm_experiment.py --sites PITT --n-splits 5 --steps 300
+python src/vlm_experiment.py --schemes intra inter --steps 1000 --eval zeroshot linear finetune
+
+# Baseline without any pre-training: off-the-shelf DINOv2 features + linear probe
+python src/vlm_experiment.py --steps 0 --eval linear
+```
+
+On an M1 Pro (16 GB) a pre-training step at 140 px and batch 32 takes about
+1.5 s, so 1000 steps are about 25 minutes per fold. `--folds` runs a subset
+of folds; results are written after every fold. See `--help` for the model,
+loss and schedule options.
+
+Outputs in `results/`: `vlm_<tag>_folds.csv` (one row per fold and
+protocol, with accuracy, balanced accuracy, AUC, sensitivity, specificity),
+`_summary.csv` (mean/std over folds and accuracy pooled over test
+subjects), `_scores.csv` (one score per test subject) and `_history.csv`
+(training losses).
+
+### First results (smoke scale: one site, 300 steps)
+
+Both runs use the 50 quality-checked PITT subjects (24 ASD / 26 TC),
+5-fold site-and-diagnosis-stratified CV, 4 evaluation time points × 21
+slices per subject, seed 0, on an M1 Pro (about 10 minutes per fold for the
+pre-trained model). Chance is 0.52 (majority class).
+
+| Model | Protocol | Accuracy | Pooled | Balanced acc. | AUC | Sens. | Spec. |
+|---|---|---|---|---|---|---|---|
+| DINOv2-S features, no pre-training | linear probe | 0.54 ± 0.21 | 0.54 | 0.55 | 0.52 | 0.54 | 0.55 |
+| MaMA-style, 300 steps | linear probe | 0.48 ± 0.19 | 0.48 | 0.48 | 0.50 | 0.53 | 0.43 |
+| MaMA-style, 300 steps | zero-shot | 0.42 ± 0.08 | 0.42 | 0.40 | 0.33 | 0.08 | 0.73 |
+
+Nothing beats chance at this scale, which is what 40 training subjects
+from one site and 300 steps should give; the run is a functional check,
+not an evaluation. Two observations from `results/pitt_mama300_history.csv`
+matter for the next, larger run:
+
+- **The multi-view loss learns, the image-text loss does not.** L_VV
+  falls from 3.4 to about 2.6 (ln 32 = 3.47 is the random level) while
+  L_VT stays at 3.42 and the local loss at 3.43. With template reports,
+  every subject of the same class produces a nearly identical report once
+  the meta keywords are masked, so most texts in a batch of 32 are
+  duplicates of each other and the contrastive objective has a floor near
+  ln 16 = 2.8; 300 steps at 4e-5 with warm-up and cosine decay do not get
+  there. Longer training, a smaller `--mask-prob`, or richer report
+  fields (e.g. more phenotypic scores) would give the text tower something
+  to separate.
+- **Zero-shot is biased to "control".** The test prompts carry unmasked
+  meta information and no ADOS sentence, so they sit slightly outside the
+  training distribution; both classes get negative scores and the sign
+  test picks control most of the time. Calibrating the decision threshold
+  on training subjects, or masking less, would remove the bias.
+
+To evaluate the approach properly, build the full slice bank
+(`python src/vlm_slices.py`, all 871 subjects) and run with
+`--schemes intra inter --steps 2000` or more; the connectivity pipeline
+above is the reference to beat (67.9% pooled inter-site accuracy).
+
+### Departures from MaMA
+
+- **Smaller everything.** ViT-S instead of ViT-B, Bio_ClinicalBERT instead
+  of BioMedLM, 140 px instead of 518 px, hundreds or a few thousand steps
+  instead of 40k, so that a fold trains on a laptop. All are flags.
+- **No real reports.** ABIDE has no radiology reports; the reports are
+  templated from the phenotypic table, as MaMA's are from its tabular
+  fields, but the vocabulary is much narrower.
+- **The second view is a different instant or plane**, not a different
+  projection of the same object at the same instant, since a single fMRI
+  time point has no second acquisition.
+- **Validation** follows this project's subject-level CV rather than
+  MaMA's fixed train/test split.
 
