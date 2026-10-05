@@ -58,8 +58,11 @@ src/
   vlm_experiment.py # VLM: cross-validated ASD vs. control classification
 results/            # gitignored: per-fold CSV, summary CSV, figure
 cluster/            # Slurm scripts and guide for running on Yale's Bouchet cluster
+tests/              # fast tests on synthetic data, run by `make check`
 notebooks/          # exploratory work (empty so far)
 requirements.txt    # pinned package versions
+requirements-dev.txt  # plus ruff and pytest, for `make check`
+CLAUDE.md           # working rules: quality gates, testing, scientific practice
 ```
 
 ## Setup
@@ -71,6 +74,15 @@ pip install -r requirements.txt
 ```
 
 To run on Yale's Bouchet cluster instead, see [cluster/README.md](cluster/README.md).
+
+## Development
+
+Every change goes through `make check` (ruff lint, format check, and the
+test suite in `tests/`, about 15 s on synthetic data) before it is committed
+or its results are reported. `make dev` installs the tools, `make format`
+fixes formatting, and `make smoke` runs the one-minute PITT+OLIN experiment
+on cached data to confirm that results are unchanged. The rules, including
+the scientific ones, are in [CLAUDE.md](CLAUDE.md).
 
 ## Running
 
