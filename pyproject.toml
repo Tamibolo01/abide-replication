@@ -1,0 +1,25 @@
+# Tool configuration only: src/ is a set of flat scripts, not an installable package.
+# `make check` runs everything below (see CLAUDE.md).
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src"]  # so `import connectivity` sorts as first-party
+extend-exclude = ["notebooks"]  # venv/, data/, results/, logs/ are excluded via .gitignore
+
+[tool.ruff.lint]
+# ruff's defaults (E4, E7, E9, F) plus pycodestyle warnings and import ordering.
+# E501 is deliberately off: the formatter owns line width.
+select = ["E4", "E7", "E9", "F", "W", "I"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra --strict-markers --durations=5"
+norecursedirs = ["venv", ".venv", "data", "results", "logs", ".*", "build", "dist"]
+markers = [
+    "vlm: imports torch/transformers (about 5 s on the laptop); deselect with -m 'not vlm'",
+]

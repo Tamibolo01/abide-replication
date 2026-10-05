@@ -1,0 +1,7 @@
+# Development tools on top of requirements.txt: `make dev` installs both.
+# Pinned exactly, like requirements.txt. These never run on the cluster jobs.
+-r requirements.txt
+iniconfig==2.3.0
+pluggy==1.6.0
+pytest==9.1.1
+ruff==0.16.10
