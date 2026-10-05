@@ -7,6 +7,7 @@ one set per fold) and writes DIR/TAG_{folds,scores,history,summary}.csv, the sam
 files a single ``python src/vlm_experiment.py --tag TAG`` produces, then prints the
 summary. Tasks that have not finished are simply absent: run it again later.
 """
+
 import argparse
 import sys
 from pathlib import Path
@@ -16,8 +17,18 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import vlm_experiment  # noqa: E402
 
-SHOW = ["cv_scheme", "method", "n_folds", "accuracy_mean", "accuracy_std", "accuracy_pooled",
-        "balanced_accuracy_mean", "auc_mean", "sensitivity_mean", "specificity_mean"]
+SHOW = [
+    "cv_scheme",
+    "method",
+    "n_folds",
+    "accuracy_mean",
+    "accuracy_std",
+    "accuracy_pooled",
+    "balanced_accuracy_mean",
+    "auc_mean",
+    "sensitivity_mean",
+    "specificity_mean",
+]
 
 
 def main():

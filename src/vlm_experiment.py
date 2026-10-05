@@ -65,11 +65,11 @@ from sklearn.model_selection import GridSearchCV, GroupKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-import download
 import connectivity_experiment
+import download
+import vlm_model
 import vlm_reports
 import vlm_slices
-import vlm_model
 
 METHODS = ("zeroshot", "linear", "finetune")
 PAIR_MODES = ("self", "time", "plane", "any")
@@ -189,7 +189,9 @@ def zeroshot_scores(model, banks, rows, file_ids, planes, image_size, device, n_
 def subject_features(model, banks, file_ids, planes, image_size, device, n_timepoints=None):
     """Frozen image-encoder features of every evaluation slice, one array per subject."""
     return [
-        vlm_model.embed_images(model, subject_slices(banks[file_id], planes, n_timepoints)[0], image_size, device)["features"]
+        vlm_model.embed_images(model, subject_slices(banks[file_id], planes, n_timepoints)[0], image_size, device)[
+            "features"
+        ]
         for file_id in file_ids
     ]
 
@@ -200,8 +202,12 @@ def linear_probe_scores(train_features, y_train, test_features, inner_cv=3):
     y = np.concatenate([np.full(len(f), label) for f, label in zip(train_features, y_train)])
     groups = np.concatenate([np.full(len(f), i) for i, f in enumerate(train_features)])
     probe = make_pipeline(StandardScaler(), LogisticRegression(max_iter=5000, class_weight="balanced"))
-    search = GridSearchCV(probe, {"logisticregression__C": PROBE_C_GRID},
-                          cv=GroupKFold(n_splits=min(inner_cv, len(train_features))), n_jobs=1)
+    search = GridSearchCV(
+        probe,
+        {"logisticregression__C": PROBE_C_GRID},
+        cv=GroupKFold(n_splits=min(inner_cv, len(train_features))),
+        n_jobs=1,
+    )
     search.fit(X, y, groups=groups)
     scores = np.array([search.decision_function(f).mean() for f in test_features])
     return scores, search.best_params_["logisticregression__C"]
@@ -211,9 +217,17 @@ def finetune_scores(model, banks, train_ids, y_train, test_ids, planes, args, de
     """Full fine-tuning of a copy of the image encoder with a linear head; per-subject mean logit."""
     classifier = vlm_model.SliceClassifier(copy.deepcopy(model.image_encoder))
     dataset = LabelledSlices(banks, train_ids, y_train, planes, args.n_timepoints_eval)
-    vlm_model.fit_classifier(classifier, dataset, steps=args.finetune_steps, batch_size=args.batch_size,
-                       lr=args.finetune_lr, weight_decay=args.weight_decay, image_size=args.image_size,
-                       device=device, seed=args.seed)
+    vlm_model.fit_classifier(
+        classifier,
+        dataset,
+        steps=args.finetune_steps,
+        batch_size=args.batch_size,
+        lr=args.finetune_lr,
+        weight_decay=args.weight_decay,
+        image_size=args.image_size,
+        device=device,
+        seed=args.seed,
+    )
     scores = []
     for file_id in test_ids:
         images, _ = subject_slices(banks[file_id], planes, args.n_timepoints_eval)
@@ -233,9 +247,16 @@ def score_subjects(y_true, scores):
 
 def build_model(args):
     torch.manual_seed(args.seed)
-    return vlm_model.MaMA(image_model=args.image_model, text_model=args.text_model, proj_dim=args.proj_dim,
-                    lora_rank=args.lora_rank, tau_vv=args.tau_vv, tau_local=args.tau_local,
-                    freeze_image=args.freeze_image, grad_checkpointing=not args.no_grad_checkpointing)
+    return vlm_model.MaMA(
+        image_model=args.image_model,
+        text_model=args.text_model,
+        proj_dim=args.proj_dim,
+        lora_rank=args.lora_rank,
+        tau_vv=args.tau_vv,
+        tau_local=args.tau_local,
+        freeze_image=args.freeze_image,
+        grad_checkpointing=not args.no_grad_checkpointing,
+    )
 
 
 def run_fold(args, scheme, fold, train, test, file_ids, rows, banks, y, device):
@@ -243,25 +264,40 @@ def run_fold(args, scheme, fold, train, test, file_ids, rows, banks, y, device):
     train_ids = [file_ids[i] for i in train]
     test_ids = [file_ids[i] for i in test]
     start = time.time()
-    print(f"\n=== {scheme} / {fold}: {len(train_ids)} train, {len(test_ids)} test subjects "
-          f"({int(y[test].sum())} ASD / {int((y[test] == 0).sum())} TC in test)")
+    print(
+        f"\n=== {scheme} / {fold}: {len(train_ids)} train, {len(test_ids)} test subjects "
+        f"({int(y[test].sum())} ASD / {int((y[test] == 0).sum())} TC in test)"
+    )
     # (a) A fresh model with pre-trained towers, (b) pre-trained on the training
     # subjects' pictures and reports (skipped with --steps 0).
     model = build_model(args)
     history = []
     if args.steps > 0:
         dataset = PairDataset(banks, rows, train_ids, args.planes, args.pair_mode, args.mask_prob, seed=args.seed)
-        history = vlm_model.fit(model, dataset, steps=args.steps, batch_size=args.batch_size, lr=args.lr,
-                          weight_decay=args.weight_decay, warmup_frac=args.warmup_frac,
-                          local_start_frac=args.local_start_frac, local_weight=args.local_weight,
-                          vv_weight=args.vv_weight,
-                          image_size=args.image_size, device=device, seed=args.seed, log_every=args.log_every)
+        history = vlm_model.fit(
+            model,
+            dataset,
+            steps=args.steps,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+            warmup_frac=args.warmup_frac,
+            local_start_frac=args.local_start_frac,
+            local_weight=args.local_weight,
+            vv_weight=args.vv_weight,
+            image_size=args.image_size,
+            device=device,
+            seed=args.seed,
+            log_every=args.log_every,
+        )
         for record in history:
             record.update(cv_scheme=scheme, fold=fold)
     model.to(device).eval()
     if args.save_models:
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        torch.save({k: v.cpu() for k, v in model.state_dict().items()}, args.output_dir / f"{args.stem}_{scheme}_{fold}.pt")
+        torch.save(
+            {k: v.cpu() for k, v in model.state_dict().items()}, args.output_dir / f"{args.stem}_{scheme}_{fold}.pt"
+        )
 
     # (c) Score the test subjects with each protocol: one number per subject,
     # positive = autism, averaged over all of that subject's pictures.
@@ -269,23 +305,49 @@ def run_fold(args, scheme, fold, train, test, file_ids, rows, banks, y, device):
     for method in args.eval:
         hyperparameter = np.nan
         if method == "zeroshot":
-            scores = zeroshot_scores(model, banks, rows, test_ids, args.planes, args.image_size, device, args.n_timepoints_eval)
+            scores = zeroshot_scores(
+                model, banks, rows, test_ids, args.planes, args.image_size, device, args.n_timepoints_eval
+            )
         elif method == "linear":
-            train_features = subject_features(model, banks, train_ids, args.planes, args.image_size, device, args.n_timepoints_eval)
-            test_features = subject_features(model, banks, test_ids, args.planes, args.image_size, device, args.n_timepoints_eval)
+            train_features = subject_features(
+                model, banks, train_ids, args.planes, args.image_size, device, args.n_timepoints_eval
+            )
+            test_features = subject_features(
+                model, banks, test_ids, args.planes, args.image_size, device, args.n_timepoints_eval
+            )
             scores, hyperparameter = linear_probe_scores(train_features, y[train], test_features)
         elif method == "finetune":
             scores = finetune_scores(model, banks, train_ids, y[train], test_ids, args.planes, args, device)
         else:
             raise ValueError(f"unknown method {method!r}; choose from {METHODS}")
         metrics = score_subjects(y[test], scores)
-        result_rows.append({"cv_scheme": scheme, "fold": fold, "method": method, "n_train": len(train_ids),
-                            "n_test": len(test_ids), "steps": args.steps, "hyperparameter": hyperparameter, **metrics})
-        score_rows += [{"cv_scheme": scheme, "fold": fold, "method": method, "FILE_ID": file_id,
-                        "y_true": int(label), "score": float(score)}
-                       for file_id, label, score in zip(test_ids, y[test], scores)]
-        print(f"  {method:9s} accuracy {metrics['accuracy']:.3f}  balanced {metrics['balanced_accuracy']:.3f}  "
-              f"auc {metrics['auc']:.3f}  sens {metrics['sensitivity']:.3f}  spec {metrics['specificity']:.3f}")
+        result_rows.append(
+            {
+                "cv_scheme": scheme,
+                "fold": fold,
+                "method": method,
+                "n_train": len(train_ids),
+                "n_test": len(test_ids),
+                "steps": args.steps,
+                "hyperparameter": hyperparameter,
+                **metrics,
+            }
+        )
+        score_rows += [
+            {
+                "cv_scheme": scheme,
+                "fold": fold,
+                "method": method,
+                "FILE_ID": file_id,
+                "y_true": int(label),
+                "score": float(score),
+            }
+            for file_id, label, score in zip(test_ids, y[test], scores)
+        ]
+        print(
+            f"  {method:9s} accuracy {metrics['accuracy']:.3f}  balanced {metrics['balanced_accuracy']:.3f}  "
+            f"auc {metrics['auc']:.3f}  sens {metrics['sensitivity']:.3f}  spec {metrics['specificity']:.3f}"
+        )
     print(f"  fold done in {time.time() - start:.0f} s")
     del model
     return result_rows, score_rows, history
@@ -317,44 +379,85 @@ def select_folds(folds, wanted):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ASD vs. control with a MaMA-style VLM on single-time-point fMRI vlm_slices.")
+    parser = argparse.ArgumentParser(
+        description="ASD vs. control with a MaMA-style VLM on single-time-point fMRI vlm_slices."
+    )
     data = parser.add_argument_group("data")
-    data.add_argument("--slices-dir", type=Path, default=vlm_slices.SLICES_DIR, help="Slice bank built by vlm_slices.py.")
+    data.add_argument(
+        "--slices-dir", type=Path, default=vlm_slices.SLICES_DIR, help="Slice bank built by vlm_slices.py."
+    )
     data.add_argument("--sites", nargs="+", default=None, metavar="SITE_ID", help="Restrict to these sites.")
     data.add_argument("--n-subjects", type=int, default=None, help="Use only the first N subjects (in ID order).")
     data.add_argument("--planes", nargs="+", default=list(vlm_slices.PLANES), choices=vlm_slices.PLANES)
-    data.add_argument("--pair-mode", default="self", choices=PAIR_MODES,
-                      help="Second view for the picture-to-picture loss: self = an augmented copy of the same slice "
-                           "(default, one image per example); time / plane / any = another slice of the same recording.")
-    data.add_argument("--mask-prob", type=float, default=vlm_reports.MASK_PROB,
-                      help="Meta-information masking probability in the reports (default: 0.8, as MaMA).")
-    data.add_argument("--n-timepoints-eval", type=int, default=4,
-                      help="Time points per subject used for evaluation and probes (default: 4; 0 = all in the bank).")
+    data.add_argument(
+        "--pair-mode",
+        default="self",
+        choices=PAIR_MODES,
+        help="Second view for the picture-to-picture loss: self = an augmented copy of the same slice "
+        "(default, one image per example); time / plane / any = another slice of the same recording.",
+    )
+    data.add_argument(
+        "--mask-prob",
+        type=float,
+        default=vlm_reports.MASK_PROB,
+        help="Meta-information masking probability in the reports (default: 0.8, as MaMA).",
+    )
+    data.add_argument(
+        "--n-timepoints-eval",
+        type=int,
+        default=4,
+        help="Time points per subject used for evaluation and probes (default: 4; 0 = all in the bank).",
+    )
 
     cv = parser.add_argument_group("cross-validation")
     cv.add_argument("--schemes", nargs="+", default=["intra"], choices=connectivity_experiment.SCHEMES)
     cv.add_argument("--n-splits", type=int, default=10, help="Folds for intra-site CV (default: 10).")
-    cv.add_argument("--folds", nargs="+", default=None, metavar="FOLD",
-                    help="Run only these folds (names like PITT or fold03, or indices); default: all.")
-    cv.add_argument("--eval", nargs="+", default=["zeroshot", "linear"], choices=METHODS,
-                    help="Evaluation protocols (default: zeroshot linear).")
+    cv.add_argument(
+        "--folds",
+        nargs="+",
+        default=None,
+        metavar="FOLD",
+        help="Run only these folds (names like PITT or fold03, or indices); default: all.",
+    )
+    cv.add_argument(
+        "--eval",
+        nargs="+",
+        default=["zeroshot", "linear"],
+        choices=METHODS,
+        help="Evaluation protocols (default: zeroshot linear).",
+    )
     cv.add_argument("--seed", type=int, default=0)
 
     model = parser.add_argument_group("model")
-    model.add_argument("--image-model", default=vlm_model.DEFAULT_IMAGE_MODEL,
-                       help="HuggingFace DINOv2 checkpoint (default: dinov2-small; MaMA: facebook/dinov2-base).")
-    model.add_argument("--text-model", default=vlm_model.DEFAULT_TEXT_MODEL,
-                       help="HuggingFace medical language model with [SEP]-style separators (default: Bio_ClinicalBERT).")
-    model.add_argument("--image-size", type=int, default=vlm_model.DEFAULT_IMAGE_SIZE,
-                       help="Input resolution, a multiple of 14 (default: 140; MaMA-like 224 needs more memory).")
+    model.add_argument(
+        "--image-model",
+        default=vlm_model.DEFAULT_IMAGE_MODEL,
+        help="HuggingFace DINOv2 checkpoint (default: dinov2-small; MaMA: facebook/dinov2-base).",
+    )
+    model.add_argument(
+        "--text-model",
+        default=vlm_model.DEFAULT_TEXT_MODEL,
+        help="HuggingFace medical language model with [SEP]-style separators (default: Bio_ClinicalBERT).",
+    )
+    model.add_argument(
+        "--image-size",
+        type=int,
+        default=vlm_model.DEFAULT_IMAGE_SIZE,
+        help="Input resolution, a multiple of 14 (default: 140; MaMA-like 224 needs more memory).",
+    )
     model.add_argument("--proj-dim", type=int, default=256)
-    model.add_argument("--lora-rank", type=int, default=8, help="LoRA rank for the text encoder (0 = full fine-tuning).")
+    model.add_argument(
+        "--lora-rank", type=int, default=8, help="LoRA rank for the text encoder (0 = full fine-tuning)."
+    )
     model.add_argument("--tau-vv", type=float, default=0.1)
     model.add_argument("--tau-local", type=float, default=0.1)
     model.add_argument("--freeze-image", action="store_true", help="Do not fine-tune the image encoder.")
-    model.add_argument("--no-grad-checkpointing", action="store_true",
-                       help="Store activations instead of recomputing them: ~30%% faster, several times the memory. "
-                            "Use on a GPU with room to spare (the default fits a 16 GB laptop).")
+    model.add_argument(
+        "--no-grad-checkpointing",
+        action="store_true",
+        help="Store activations instead of recomputing them: ~30%% faster, several times the memory. "
+        "Use on a GPU with room to spare (the default fits a 16 GB laptop).",
+    )
 
     train = parser.add_argument_group("pre-training")
     train.add_argument("--steps", type=int, default=1000, help="Pre-training steps per fold (default: 1000; 0 = none).")
@@ -362,11 +465,19 @@ def main():
     train.add_argument("--lr", type=float, default=4e-5, help="Peak learning rate (default: 4e-5, as MaMA).")
     train.add_argument("--weight-decay", type=float, default=0.1)
     train.add_argument("--warmup-frac", type=float, default=0.1)
-    train.add_argument("--local-start-frac", type=float, default=0.2,
-                       help="Fraction of steps before the local alignment loss is switched on (default: 0.2, as MaMA's 8k/40k).")
+    train.add_argument(
+        "--local-start-frac",
+        type=float,
+        default=0.2,
+        help="Fraction of steps before the local alignment loss is switched on (default: 0.2, as MaMA's 8k/40k).",
+    )
     train.add_argument("--local-weight", type=float, default=1.0)
-    train.add_argument("--vv-weight", type=float, default=1.0,
-                       help="Weight of the picture-to-picture loss (default: 1.0; 0 = plain CLIP + local alignment).")
+    train.add_argument(
+        "--vv-weight",
+        type=float,
+        default=1.0,
+        help="Weight of the picture-to-picture loss (default: 1.0; 0 = plain CLIP + local alignment).",
+    )
     train.add_argument("--finetune-steps", type=int, default=500, help="Steps for the finetune evaluation.")
     train.add_argument("--finetune-lr", type=float, default=2e-5)
     train.add_argument("--log-every", type=int, default=50)
@@ -396,9 +507,11 @@ def main():
     if len(np.unique(y)) < 2:
         raise SystemExit("Only one diagnostic group among the selected subjects.")
     first = banks[file_ids[0]]
-    print(f"{len(file_ids)} subjects from {len(np.unique(sites))} sites; {int(y.sum())} ASD / {int((y == 0).sum())} TC; "
-          f"{first[args.planes[0]].shape[0]} time points x {len(args.planes)} planes x {first[args.planes[0]].shape[1]} slices "
-          f"of {first[args.planes[0]].shape[2]}x{first[args.planes[0]].shape[3]} px per subject")
+    print(
+        f"{len(file_ids)} subjects from {len(np.unique(sites))} sites; {int(y.sum())} ASD / {int((y == 0).sum())} TC; "
+        f"{first[args.planes[0]].shape[0]} time points x {len(args.planes)} planes x {first[args.planes[0]].shape[1]} slices "
+        f"of {first[args.planes[0]].shape[2]}x{first[args.planes[0]].shape[3]} px per subject"
+    )
     device = vlm_model.pick_device(args.device)
     args.stem = args.tag or f"vlm_n{len(file_ids)}_{args.image_model.split('/')[-1]}"
 
@@ -408,10 +521,13 @@ def main():
         if scheme == "inter" and len(np.unique(sites)) < 2:
             print("Skipping inter-site CV: only one site in the sample.")
             continue
-        folds = select_folds(list(connectivity_experiment.cv_splits(scheme, y, sites, args.n_splits, args.seed)), args.folds)
+        folds = select_folds(
+            list(connectivity_experiment.cv_splits(scheme, y, sites, args.n_splits, args.seed)), args.folds
+        )
         for fold, train_idx, test_idx in folds:
-            fold_results, fold_scores, fold_history = run_fold(args, scheme, fold, train_idx, test_idx,
-                                                               file_ids, rows, banks, y, device)
+            fold_results, fold_scores, fold_history = run_fold(
+                args, scheme, fold, train_idx, test_idx, file_ids, rows, banks, y, device
+            )
             results += fold_results
             scores += fold_scores
             history += fold_history
@@ -428,11 +544,26 @@ def main():
     results = pd.DataFrame(results)
     summary = summarize(results)
     summary.to_csv(args.output_dir / f"{args.stem}_summary.csv", index=False)
-    print(f"\nWrote {args.stem}_folds.csv, _scores.csv, _summary.csv" + (", _history.csv" if history else "")
-          + f" to {args.output_dir}\n")
+    print(
+        f"\nWrote {args.stem}_folds.csv, _scores.csv, _summary.csv"
+        + (", _history.csv" if history else "")
+        + f" to {args.output_dir}\n"
+    )
     pd.set_option("display.width", 160)
-    show = summary[["cv_scheme", "method", "n_folds", "accuracy_mean", "accuracy_std", "accuracy_pooled",
-                    "balanced_accuracy_mean", "auc_mean", "sensitivity_mean", "specificity_mean"]]
+    show = summary[
+        [
+            "cv_scheme",
+            "method",
+            "n_folds",
+            "accuracy_mean",
+            "accuracy_std",
+            "accuracy_pooled",
+            "balanced_accuracy_mean",
+            "auc_mean",
+            "sensitivity_mean",
+            "specificity_mean",
+        ]
+    ]
     print(show.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
 
 

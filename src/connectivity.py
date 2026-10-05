@@ -157,9 +157,7 @@ def connectivity_matrices(kind, timeseries):
     return measure.fit_transform(standardize_timeseries(timeseries))
 
 
-def extract_timeseries_from_func(
-    func_files, atlas_name="cort-maxprob-thr25-2mm", data_dir=None, verbose=0
-):
+def extract_timeseries_from_func(func_files, atlas_name="cort-maxprob-thr25-2mm", data_dir=None, verbose=0):
     """Paper steps 1-2 from scratch: ROI time series from 4D volumes.
 
     Uses nilearn's Harvard-Oxford atlas and a NiftiLabelsMasker to average

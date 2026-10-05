@@ -202,8 +202,7 @@ def report_from_fields(fields, plane, position, rng=None, mask_prob=MASK_PROB, m
     sentences.append("The subject is a " + " ".join(patient) + ".")
 
     sentence = (
-        f"This image is one time point of the recording, shown as a "
-        f"{position_words(plane, position)} {plane} slice"
+        f"This image is one time point of the recording, shown as a {position_words(plane, position)} {plane} slice"
     )
     if fields.get("eyes"):
         sentence += f", eyes {meta(fields['eyes'])} during the scan"
@@ -224,9 +223,7 @@ def report_from_fields(fields, plane, position, rng=None, mask_prob=MASK_PROB, m
                 assessment += f", calibrated severity {fields['ados_severity']} out of 10"
             sentences.append(assessment + ".")
     else:
-        sentences.append(
-            "Findings: the subject is a typically developing control with no autism spectrum disorder."
-        )
+        sentences.append("Findings: the subject is a typically developing control with no autism spectrum disorder.")
         sentences.append("Impression: typical development.")
     return sentences
 

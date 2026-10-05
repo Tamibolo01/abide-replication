@@ -238,8 +238,9 @@ class MaMA(nn.Module):
             text_encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs=checkpoint_kwargs)
         if lora_rank > 0:
             targets = list(lora_targets) if lora_targets else guess_lora_targets(text_encoder)
-            config = LoraConfig(r=lora_rank, lora_alpha=lora_alpha, lora_dropout=lora_dropout,
-                                target_modules=targets, bias="none")
+            config = LoraConfig(
+                r=lora_rank, lora_alpha=lora_alpha, lora_dropout=lora_dropout, target_modules=targets, bias="none"
+            )
             text_encoder = get_peft_model(text_encoder, config)  # freezes the base weights
         self.text_encoder = text_encoder
         sep = self.tokenizer.sep_token_id
@@ -402,16 +403,19 @@ def fit(
     optimizer = torch.optim.AdamW(parameters, lr=lr, weight_decay=weight_decay, betas=(0.9, 0.98))
     scheduler = cosine_schedule(optimizer, steps, warmup_frac)
     generator = torch.Generator().manual_seed(seed)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True,
-                        collate_fn=collate_pairs, generator=generator)
+    loader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, drop_last=True, collate_fn=collate_pairs, generator=generator
+    )
     if len(loader) == 0:
         raise ValueError(f"dataset has {len(dataset)} items, fewer than the batch size {batch_size}")
     local_start = int(round(local_start_frac * steps))
     history, step, start = [], 0, time.time()
     if verbose:
         n_trainable = sum(p.numel() for p in parameters)
-        print(f"Training {n_trainable / 1e6:.1f}M trainable parameters for {steps} steps "
-              f"(batch {batch_size}, {len(dataset)} slice pairs) on {device}")
+        print(
+            f"Training {n_trainable / 1e6:.1f}M trainable parameters for {steps} steps "
+            f"(batch {batch_size}, {len(dataset)} slice pairs) on {device}"
+        )
     while step < steps:
         for batch in loader:
             if step >= steps:
@@ -429,14 +433,21 @@ def fit(
             scheduler.step()
             step += 1
             if step % log_every == 0 or step == steps:
-                record = {"step": step, **{k: v.item() for k, v in losses.items()},
-                          "local_weight": weight, "lr": scheduler.get_last_lr()[0],
-                          "seconds": time.time() - start, "memory_gb": device_memory_gb(device)}
+                record = {
+                    "step": step,
+                    **{k: v.item() for k, v in losses.items()},
+                    "local_weight": weight,
+                    "lr": scheduler.get_last_lr()[0],
+                    "seconds": time.time() - start,
+                    "memory_gb": device_memory_gb(device),
+                }
                 history.append(record)
                 if verbose:
-                    print(f"  step {step}/{steps} total {record['total']:.3f} vv {record['vv']:.3f} "
-                          f"vt {0.5 * (record['vt1'] + record['vt2']):.3f} local {record['local']:.3f} "
-                          f"({record['seconds']:.0f} s, {record['memory_gb']:.1f} GB)")
+                    print(
+                        f"  step {step}/{steps} total {record['total']:.3f} vv {record['vv']:.3f} "
+                        f"vt {0.5 * (record['vt1'] + record['vt2']):.3f} local {record['local']:.3f} "
+                        f"({record['seconds']:.0f} s, {record['memory_gb']:.1f} GB)"
+                    )
     model.eval()
     return history
 
@@ -493,19 +504,34 @@ def collate_labelled(batch):
     return np.stack([image for image, _ in batch]), np.asarray([label for _, label in batch], dtype=np.float32)
 
 
-def fit_classifier(classifier, dataset, steps, batch_size=32, lr=2e-5, weight_decay=0.1, warmup_frac=0.05,
-                   image_size=DEFAULT_IMAGE_SIZE, device=None, seed=0, log_every=50, verbose=1):
+def fit_classifier(
+    classifier,
+    dataset,
+    steps,
+    batch_size=32,
+    lr=2e-5,
+    weight_decay=0.1,
+    warmup_frac=0.05,
+    image_size=DEFAULT_IMAGE_SIZE,
+    device=None,
+    seed=0,
+    log_every=50,
+    verbose=1,
+):
     """Train SliceClassifier on a dataset of (uint8 slice, label) pairs with class-balanced BCE."""
     device = pick_device() if device is None else device
     classifier.to(device).train()
     labels = np.asarray([dataset[i][1] for i in range(len(dataset))], dtype=np.float32)
-    pos_weight = torch.tensor(float((labels == 0).sum() / max(1, (labels == 1).sum())), dtype=torch.float32, device=device)
+    pos_weight = torch.tensor(
+        float((labels == 0).sum() / max(1, (labels == 1).sum())), dtype=torch.float32, device=device
+    )
     parameters = [p for p in classifier.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(parameters, lr=lr, weight_decay=weight_decay, betas=(0.9, 0.98))
     scheduler = cosine_schedule(optimizer, steps, warmup_frac)
     generator = torch.Generator().manual_seed(seed)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True,
-                        collate_fn=collate_labelled, generator=generator)
+    loader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=True, drop_last=True, collate_fn=collate_labelled, generator=generator
+    )
     history, step, start = [], 0, time.time()
     while step < steps:
         for images, y in loader:
@@ -514,7 +540,9 @@ def fit_classifier(classifier, dataset, steps, batch_size=32, lr=2e-5, weight_de
             x = prepare_images(images, image_size, augment=True, generator=generator).to(device)
             with autocast(device):
                 logits = classifier(x)
-            loss = F.binary_cross_entropy_with_logits(logits.float(), torch.as_tensor(y, device=device), pos_weight=pos_weight)
+            loss = F.binary_cross_entropy_with_logits(
+                logits.float(), torch.as_tensor(y, device=device), pos_weight=pos_weight
+            )
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(parameters, 1.0)

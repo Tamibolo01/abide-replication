@@ -186,9 +186,7 @@ def main():
     """CLI entry point: download derivatives and print a per-site summary."""
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="Download ABIDE preprocessed data via nilearn into data/."
-    )
+    parser = argparse.ArgumentParser(description="Download ABIDE preprocessed data via nilearn into data/.")
     parser.add_argument(
         "--derivative",
         default="rois_ho",

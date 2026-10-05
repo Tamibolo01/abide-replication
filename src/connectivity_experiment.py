@@ -258,8 +258,18 @@ def plot_results(summary, path, title="ASD vs. control classification accuracy")
             xs = [i + offset for i, c in enumerate(classifiers) if c in rows.index]
             means = [rows.loc[c, "accuracy_mean"] for c in classifiers if c in rows.index]
             stds = [rows.loc[c, "accuracy_std"] for c in classifiers if c in rows.index]
-            ax.errorbar(xs, means, yerr=stds, fmt="o", ms=7, color=KIND_COLORS[kind],
-                        ecolor=KIND_COLORS[kind], elinewidth=1.5, capsize=3, label=kind)
+            ax.errorbar(
+                xs,
+                means,
+                yerr=stds,
+                fmt="o",
+                ms=7,
+                color=KIND_COLORS[kind],
+                ecolor=KIND_COLORS[kind],
+                elinewidth=1.5,
+                capsize=3,
+                label=kind,
+            )
         chance = panel[panel["classifier"] == "dummy"]["accuracy_mean"]
         if len(chance):
             ax.axhline(chance.mean(), color=INK_MUTED, ls="--", lw=1, label="chance (majority class)")
@@ -285,19 +295,38 @@ def plot_results(summary, path, title="ASD vs. control classification accuracy")
 
 def main():
     parser = argparse.ArgumentParser(description="Replicate the ABIDE classification experiment.")
-    parser.add_argument("--atlas", default="ho", choices=sorted(download.ROI_DERIVATIVES),
-                        help="Reference atlas whose PCP ROI time series to use (default: ho).")
-    parser.add_argument("--n-subjects", type=int, default=None,
-                        help="Use only the first N subjects (default: all 871).")
-    parser.add_argument("--sites", nargs="+", default=None, metavar="SITE_ID",
-                        help="Restrict to these sites, e.g. --sites PITT OLIN (default: all sites).")
-    parser.add_argument("--kinds", nargs="+", default=list(connectivity.KINDS), choices=connectivity.KINDS,
-                        help="Connectivity measures to compare.")
+    parser.add_argument(
+        "--atlas",
+        default="ho",
+        choices=sorted(download.ROI_DERIVATIVES),
+        help="Reference atlas whose PCP ROI time series to use (default: ho).",
+    )
+    parser.add_argument(
+        "--n-subjects", type=int, default=None, help="Use only the first N subjects (default: all 871)."
+    )
+    parser.add_argument(
+        "--sites",
+        nargs="+",
+        default=None,
+        metavar="SITE_ID",
+        help="Restrict to these sites, e.g. --sites PITT OLIN (default: all sites).",
+    )
+    parser.add_argument(
+        "--kinds",
+        nargs="+",
+        default=list(connectivity.KINDS),
+        choices=connectivity.KINDS,
+        help="Connectivity measures to compare.",
+    )
     parser.add_argument("--classifiers", nargs="+", default=list(CLASSIFIER_NAMES), choices=CLASSIFIER_NAMES)
     parser.add_argument("--schemes", nargs="+", default=list(SCHEMES), choices=SCHEMES)
     parser.add_argument("--n-splits", type=int, default=10, help="Folds for intra-site CV.")
-    parser.add_argument("--inner-cv", type=int, default=3,
-                        help="Inner folds for choosing the SVC penalty on the training set (default: 3).")
+    parser.add_argument(
+        "--inner-cv",
+        type=int,
+        default=3,
+        help="Inner folds for choosing the SVC penalty on the training set (default: 3).",
+    )
     parser.add_argument("--n-jobs", type=int, default=1, help="Parallel workers (-1 = all cores).")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output-dir", type=Path, default=RESULTS_DIR)
@@ -306,9 +335,7 @@ def main():
     # Step 1 of 4: load the region signals (one table per subject) and the subject
     # table; turn the latter into labels (1 = autism, 0 = control) and site names.
     filters = {"SITE_ID": args.sites} if args.sites else {}
-    timeseries, phenotypic = download.fetch_roi_timeseries(
-        args.atlas, n_subjects=args.n_subjects, verbose=0, **filters
-    )
+    timeseries, phenotypic = download.fetch_roi_timeseries(args.atlas, n_subjects=args.n_subjects, verbose=0, **filters)
     y, sites = download.phenotypic_targets(phenotypic)
     if len(np.unique(y)) < 2:
         raise SystemExit(
@@ -317,15 +344,26 @@ def main():
         )
     # Step 2 of 4: drop brain regions that some scanners never captured.
     timeseries, keep = connectivity.drop_constant_rois(timeseries)
-    print(f"{len(timeseries)} subjects from {len(np.unique(sites))} sites; "
-          f"{int(y.sum())} ASD / {int((y == 0).sum())} TC; "
-          f"{keep.sum()} of {len(keep)} ROIs kept -> {keep.sum() * (keep.sum() - 1) // 2} features")
+    print(
+        f"{len(timeseries)} subjects from {len(np.unique(sites))} sites; "
+        f"{int(y.sum())} ASD / {int((y == 0).sum())} TC; "
+        f"{keep.sum()} of {len(keep)} ROIs kept -> {keep.sum() * (keep.sum() - 1) // 2} features"
+    )
 
     # Step 3 of 4: for every split of the subjects, every connectivity measure and every
     # classifier, train on the training subjects and score the test subjects.
-    results = run_experiment(timeseries, y, sites, kinds=args.kinds, classifiers=args.classifiers,
-                             schemes=args.schemes, n_splits=args.n_splits, inner_cv=args.inner_cv,
-                             n_jobs=args.n_jobs, random_state=args.seed)
+    results = run_experiment(
+        timeseries,
+        y,
+        sites,
+        kinds=args.kinds,
+        classifiers=args.classifiers,
+        schemes=args.schemes,
+        n_splits=args.n_splits,
+        inner_cv=args.inner_cv,
+        n_jobs=args.n_jobs,
+        random_state=args.seed,
+    )
     # Step 4 of 4: average over folds, save the tables and the figure, print a summary.
     summary = summarize(results)
 
@@ -333,13 +371,25 @@ def main():
     stem = f"{args.atlas}_n{len(timeseries)}"
     results.to_csv(args.output_dir / f"{stem}_folds.csv", index=False)
     summary.to_csv(args.output_dir / f"{stem}_summary.csv", index=False)
-    plot_results(summary, args.output_dir / f"{stem}_accuracy.png",
-                 title=f"ABIDE, {args.atlas} atlas, n={len(timeseries)}")
+    plot_results(
+        summary, args.output_dir / f"{stem}_accuracy.png", title=f"ABIDE, {args.atlas} atlas, n={len(timeseries)}"
+    )
     print(f"\nWrote {stem}_folds.csv, {stem}_summary.csv, {stem}_accuracy.png to {args.output_dir}\n")
 
     pd.set_option("display.width", 160)
-    show = summary[["cv_scheme", "connectivity", "classifier", "accuracy_mean", "accuracy_std",
-                    "accuracy_pooled", "sensitivity_mean", "specificity_mean", "hyperparameter_median"]]
+    show = summary[
+        [
+            "cv_scheme",
+            "connectivity",
+            "classifier",
+            "accuracy_mean",
+            "accuracy_std",
+            "accuracy_pooled",
+            "sensitivity_mean",
+            "specificity_mean",
+            "hyperparameter_median",
+        ]
+    ]
     print(show.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
 
 

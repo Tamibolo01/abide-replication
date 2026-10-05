@@ -193,8 +193,10 @@ def build_slices(phenotypic, slices_dir=SLICES_DIR, n_timepoints=16, n_slices=7,
         if downloaded and not keep_volumes:
             volume_file.unlink()
         if verbose:
-            print(f"[{n}/{len(phenotypic)}] {file_id}: {volumes.shape} -> {out.name} "
-                  f"({'downloaded' if downloaded else 'cached'}, {time.time() - start:.0f} s)")
+            print(
+                f"[{n}/{len(phenotypic)}] {file_id}: {volumes.shape} -> {out.name} "
+                f"({'downloaded' if downloaded else 'cached'}, {time.time() - start:.0f} s)"
+            )
     return paths
 
 
@@ -217,15 +219,26 @@ def load_slices(file_ids, slices_dir=SLICES_DIR):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build the single-time-point slice bank from ABIDE func_preproc volumes.")
-    parser.add_argument("--sites", nargs="+", default=None, metavar="SITE_ID",
-                        help="Restrict to these sites, e.g. --sites PITT NYU (default: all sites).")
-    parser.add_argument("--n-subjects", type=int, default=None,
-                        help="Process only the first N matching subjects (in ID order).")
+    parser = argparse.ArgumentParser(
+        description="Build the single-time-point slice bank from ABIDE func_preproc volumes."
+    )
+    parser.add_argument(
+        "--sites",
+        nargs="+",
+        default=None,
+        metavar="SITE_ID",
+        help="Restrict to these sites, e.g. --sites PITT NYU (default: all sites).",
+    )
+    parser.add_argument(
+        "--n-subjects", type=int, default=None, help="Process only the first N matching subjects (in ID order)."
+    )
     parser.add_argument("--n-timepoints", type=int, default=16, help="Time points per subject (default: 16).")
     parser.add_argument("--n-slices", type=int, default=7, help="Slices per plane (default: 7).")
-    parser.add_argument("--keep-volumes", action="store_true",
-                        help="Keep downloaded 4D volumes (100 MB each) instead of deleting them after slicing.")
+    parser.add_argument(
+        "--keep-volumes",
+        action="store_true",
+        help="Keep downloaded 4D volumes (100 MB each) instead of deleting them after slicing.",
+    )
     parser.add_argument("--slices-dir", type=Path, default=SLICES_DIR)
     args = parser.parse_args()
 
@@ -234,8 +247,12 @@ def main():
     filters = {"SITE_ID": args.sites} if args.sites else {}
     _, phenotypic = download.fetch_roi_timeseries("ho", n_subjects=args.n_subjects, verbose=0, **filters)
     y, sites = download.phenotypic_targets(phenotypic)
-    print(f"{len(phenotypic)} subjects from {len(np.unique(sites))} sites; {int(y.sum())} ASD / {int((y == 0).sum())} TC")
-    print(f"Slices -> {args.slices_dir} ({args.n_timepoints} time points x {len(PLANES)} planes x {args.n_slices} slices per subject)")
+    print(
+        f"{len(phenotypic)} subjects from {len(np.unique(sites))} sites; {int(y.sum())} ASD / {int((y == 0).sum())} TC"
+    )
+    print(
+        f"Slices -> {args.slices_dir} ({args.n_timepoints} time points x {len(PLANES)} planes x {args.n_slices} slices per subject)"
+    )
     build_slices(phenotypic, args.slices_dir, args.n_timepoints, args.n_slices, args.keep_volumes)
 
 
