@@ -48,7 +48,10 @@ of the split. Within each fold:
    the off-the-shelf DINOv2 features (linear / finetune).
 
 Results land in results/ like connectivity_experiment.py: per-fold CSV, summary CSV,
-per-subject scores CSV and the training-loss history.
+per-subject scores CSV and the training-loss history. ``--eval-train`` adds the
+accuracy on each fold's training subjects (train_accuracy, train_auc) next to the
+held-out numbers: a large gap means the model memorised its training subjects,
+chance on both means it has not learned anything yet.
 """
 
 import argparse
@@ -197,7 +200,11 @@ def subject_features(model, banks, file_ids, planes, image_size, device, n_timep
 
 
 def linear_probe_scores(train_features, y_train, test_features, inner_cv=3):
-    """Subject-grouped logistic regression on slice features; per-subject mean decision value."""
+    """Subject-grouped logistic regression on slice features; per-subject mean decision value.
+
+    Returns (test scores, chosen C, the fitted GridSearchCV), the last so that the training
+    subjects can be scored with the same probe (--eval-train).
+    """
     X = np.concatenate(train_features)
     y = np.concatenate([np.full(len(f), label) for f, label in zip(train_features, y_train)])
     groups = np.concatenate([np.full(len(f), i) for i, f in enumerate(train_features)])
@@ -210,7 +217,7 @@ def linear_probe_scores(train_features, y_train, test_features, inner_cv=3):
     )
     search.fit(X, y, groups=groups)
     scores = np.array([search.decision_function(f).mean() for f in test_features])
-    return scores, search.best_params_["logisticregression__C"]
+    return scores, search.best_params_["logisticregression__C"], search
 
 
 def finetune_scores(model, banks, train_ids, y_train, test_ids, planes, args, device):
@@ -301,13 +308,21 @@ def run_fold(args, scheme, fold, train, test, file_ids, rows, banks, y, device):
 
     # (c) Score the test subjects with each protocol: one number per subject,
     # positive = autism, averaged over all of that subject's pictures.
+    # (d) With --eval-train the training subjects are scored too. A model that scores its own
+    # training subjects far above the held-out ones has memorised them (overfitting); one that
+    # scores both at chance has not learned anything yet (underfitting).
     result_rows, score_rows = [], []
     for method in args.eval:
         hyperparameter = np.nan
+        train_scores = None
         if method == "zeroshot":
             scores = zeroshot_scores(
                 model, banks, rows, test_ids, args.planes, args.image_size, device, args.n_timepoints_eval
             )
+            if args.eval_train:
+                train_scores = zeroshot_scores(
+                    model, banks, rows, train_ids, args.planes, args.image_size, device, args.n_timepoints_eval
+                )
         elif method == "linear":
             train_features = subject_features(
                 model, banks, train_ids, args.planes, args.image_size, device, args.n_timepoints_eval
@@ -315,12 +330,15 @@ def run_fold(args, scheme, fold, train, test, file_ids, rows, banks, y, device):
             test_features = subject_features(
                 model, banks, test_ids, args.planes, args.image_size, device, args.n_timepoints_eval
             )
-            scores, hyperparameter = linear_probe_scores(train_features, y[train], test_features)
+            scores, hyperparameter, probe = linear_probe_scores(train_features, y[train], test_features)
+            if args.eval_train:
+                train_scores = np.array([probe.decision_function(f).mean() for f in train_features])
         elif method == "finetune":
             scores = finetune_scores(model, banks, train_ids, y[train], test_ids, args.planes, args, device)
         else:
             raise ValueError(f"unknown method {method!r}; choose from {METHODS}")
         metrics = score_subjects(y[test], scores)
+        train_metrics = score_subjects(y[train], train_scores) if train_scores is not None else {}
         result_rows.append(
             {
                 "cv_scheme": scheme,
@@ -331,6 +349,8 @@ def run_fold(args, scheme, fold, train, test, file_ids, rows, banks, y, device):
                 "steps": args.steps,
                 "hyperparameter": hyperparameter,
                 **metrics,
+                "train_accuracy": train_metrics.get("accuracy", np.nan),
+                "train_auc": train_metrics.get("auc", np.nan),
             }
         )
         score_rows += [
@@ -347,6 +367,11 @@ def run_fold(args, scheme, fold, train, test, file_ids, rows, banks, y, device):
         print(
             f"  {method:9s} accuracy {metrics['accuracy']:.3f}  balanced {metrics['balanced_accuracy']:.3f}  "
             f"auc {metrics['auc']:.3f}  sens {metrics['sensitivity']:.3f}  spec {metrics['specificity']:.3f}"
+            + (
+                f"  | training subjects: accuracy {train_metrics['accuracy']:.3f}  auc {train_metrics['auc']:.3f}"
+                if train_metrics
+                else ""
+            )
         )
     print(f"  fold done in {time.time() - start:.0f} s")
     del model
@@ -362,6 +387,9 @@ def summarize(results):
     pooled = results.assign(correct=results["accuracy"] * results["n_test"]).groupby(keys)
     stats["accuracy_pooled"] = pooled["correct"].sum() / pooled["n_test"].sum()
     stats["n_folds"] = results.groupby(keys).size()
+    for column in ("train_accuracy", "train_auc"):  # only present with --eval-train
+        if column in results:
+            stats[f"{column}_mean"] = results.groupby(keys)[column].mean()
     return stats.reset_index()
 
 
@@ -425,6 +453,12 @@ def main():
         default=["zeroshot", "linear"],
         choices=METHODS,
         help="Evaluation protocols (default: zeroshot linear).",
+    )
+    cv.add_argument(
+        "--eval-train",
+        action="store_true",
+        help="Also score each fold's training subjects (zero-shot and linear probe), so the gap between "
+        "training and held-out accuracy, the signature of overfitting, is in the results.",
     )
     cv.add_argument("--seed", type=int, default=0)
 
@@ -563,6 +597,7 @@ def main():
             "sensitivity_mean",
             "specificity_mean",
         ]
+        + [c for c in ("train_accuracy_mean", "train_auc_mean") if c in summary]
     ]
     print(show.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
 

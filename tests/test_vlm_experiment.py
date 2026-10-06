@@ -57,6 +57,30 @@ def test_summarize_pools_accuracy_by_test_set_size():
     assert summary.loc[0, "accuracy_mean"] == pytest.approx(0.5)
     assert summary.loc[0, "accuracy_pooled"] == pytest.approx(0.1)
     assert summary.loc[0, "n_folds"] == 2
+    assert "train_accuracy_mean" not in summary  # only with --eval-train
+
+
+def test_summarize_carries_training_subject_accuracy_when_present():
+    rows = [
+        {
+            "cv_scheme": "intra",
+            "method": "zeroshot",
+            "fold": f,
+            "n_test": 10,
+            "accuracy": acc,
+            "balanced_accuracy": acc,
+            "auc": acc,
+            "sensitivity": acc,
+            "specificity": acc,
+            "train_accuracy": tr,
+            "train_auc": tr,
+        }
+        for f, acc, tr in (("fold00", 0.5, 1.0), ("fold01", 0.6, 0.9))
+    ]
+    summary = ve.summarize(pd.DataFrame(rows))
+    assert summary.loc[0, "accuracy_mean"] == pytest.approx(0.55)
+    assert summary.loc[0, "train_accuracy_mean"] == pytest.approx(0.95)  # the fit/generalisation gap is visible
+    assert summary.loc[0, "train_auc_mean"] == pytest.approx(0.95)
 
 
 @pytest.fixture
