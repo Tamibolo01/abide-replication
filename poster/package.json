@@ -1,0 +1,8 @@
+{
+  "name": "abide-poster",
+  "private": true,
+  "description": "Builds poster/abide_poster_A0.pptx from the results in results/ (see README.md)",
+  "dependencies": {
+    "pptxgenjs": "^4.0.0"
+  }
+}
