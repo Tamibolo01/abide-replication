@@ -5,7 +5,7 @@
 line-length = 120
 target-version = "py312"
 src = ["src"]  # so `import connectivity` sorts as first-party
-extend-exclude = ["notebooks"]  # venv/, data/, results/, logs/ are excluded via .gitignore
+extend-exclude = ["*.ipynb"]  # notebooks are run, not linted; venv/, data/, results/, logs/ are excluded via .gitignore
 
 [tool.ruff.lint]
 # ruff's defaults (E4, E7, E9, F) plus pycodestyle warnings and import ordering.
