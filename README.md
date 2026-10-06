@@ -268,7 +268,7 @@ protocol, with accuracy, balanced accuracy, AUC, sensitivity, specificity),
 subjects), `_scores.csv` (one score per test subject) and `_history.csv`
 (training losses).
 
-### First results (smoke scale: one site, 300 steps)
+### First results (smoke scale: one site, 300 steps, superseded below)
 
 Both runs use the 50 quality-checked PITT subjects (24 ASD / 26 TC),
 5-fold site-and-diagnosis-stratified CV, 4 evaluation time points × 21
@@ -301,6 +301,53 @@ matter for the next, larger run:
   training distribution; both classes get negative scores and the sign
   test picks control most of the time. Calibrating the decision threshold
   on training subjects, or masking less, would remove the bias.
+
+### Full PITT set, held-out evaluation (50 subjects, 400 steps)
+
+The same 50 PITT subjects and 5-fold stratified CV (seed 0), scored on
+held-out subjects only, with `--eval-train` reporting each fold's training
+subjects as well so that overfitting is measured rather than hidden. Run with
+the code of commit 09bae66 (the `--eval-train` change, before it was
+committed); about 15-20 minutes per fold on the M1 Pro when the machine is
+otherwise idle.
+
+```bash
+python src/vlm_experiment.py --sites PITT --n-splits 5 --steps 0 --eval linear --eval-train --tag pitt50_baseline
+python src/vlm_experiment.py --sites PITT --n-splits 5 --steps 400 --eval zeroshot linear --eval-train --tag pitt50_mama400
+```
+
+| Model | Protocol | Held-out accuracy | Pooled | Balanced | AUC | Sens. | Spec. | Training-subject accuracy |
+|---|---|---|---|---|---|---|---|---|
+| DINOv2-S features, no pre-training | linear probe | 0.54 ± 0.21 | 0.54 | 0.55 | 0.52 | 0.54 | 0.55 | 0.94 |
+| MaMA-style, 400 steps | linear probe | 0.52 ± 0.25 | 0.52 | 0.52 | 0.51 | 0.49 | 0.55 | 0.84 |
+| MaMA-style, 400 steps | zero-shot | 0.40 ± 0.19 | 0.40 | 0.40 | 0.39 | 0.61 | 0.19 | 0.64 |
+| chance (majority class) | | 0.52 | | | | | | |
+
+Files: `results/pitt50_{baseline,mama400}_{folds,scores,summary}.csv` and
+`results/pitt50_mama400_history.csv`.
+
+- **No held-out signal.** Nothing beats the 0.52 chance level, and the
+  per-fold accuracies range from 0.2 to 0.9 (10 test subjects per fold, so
+  one subject is 10 points): the estimate is noisy, and the mean is at
+  chance.
+- **The models do fit their training subjects.** The probe scores 0.84-0.94
+  and zero-shot 0.64 on the 40 subjects each fold was trained on. That gap,
+  not a failure to learn, is the finding: with 40 subjects from one site
+  the models memorise who is who and nothing transfers to new people.
+- **The picture-report loss now learns.** Unlike the 300-step run, L_VT
+  fell from 3.5 to about 2.4 in every fold (ln 32 = 3.47 is random) and
+  the local loss from 3.47 to 2.4, so the text tower is no longer the
+  bottleneck; what it learns is subject-specific.
+- **Zero-shot is miscalibrated**, this time towards "autism" (sensitivity
+  0.61, specificity 0.19), the mirror image of the 300-step run. The sign
+  of the score difference is not a usable threshold at this scale.
+
+What limits overfitting here is already in the pipeline: splits by
+subject, nested CV for the probe, metadata masking, weight decay, LoRA and
+augmentation, hyperparameters fixed in advance, and no selection on test
+folds. What would reduce it further is more subjects, which only the full
+871-subject bank on the cluster provides; secondarily, a frozen image
+tower (`--freeze-image`) or fewer steps.
 
 To evaluate the approach properly, build the full slice bank
 (`python src/vlm_slices.py`, all 871 subjects) and run with

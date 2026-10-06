@@ -17,11 +17,11 @@ ABIDE is a public dataset of resting-state fMRI scans from 871 people at 20 site
 | | Unseen-site accuracy | Chance level |
 |---|---|---|
 | Pipeline A, best setting (tangent connectivity, ridge classifier) | 68% of 871 people | 54% |
-| Pipeline B, small trial (50 people, one site) | no better than chance | 52% |
+| Pipeline B, all 50 PITT people, 5-fold cross-validation | no better than chance (52%), while scoring 84% on the people it trained on | 52% |
 
 **Pipeline A works and matches the paper.** Trained on 19 sites and tested on the 20th, it identifies the right group for about two in three people, well above the 54% you would get by always guessing "control". The best way to measure connectivity (called tangent embedding) came out on top, as in the paper. Getting there required auditing our own code: a first version had three mistakes (signals were not standardised before computing connectivity, one setting was fixed instead of tuned, and the wrong definition of chance was used). Fixing them changed the conclusion, which is the main lesson of the project so far: before blaming a disagreement with a paper on the paper, check your own pipeline one change at a time.
 
-**Pipeline B has only been run at toy scale** (50 people from one site, a few minutes of training), where it is no better than guessing. That is expected at that scale and not yet a verdict on the approach.
+**Pipeline B, run properly on all 50 PITT people (6 October, evening).** Each of five rounds trained on 40 people and was scored on the 10 it had never seen; the rounds together give one honest number per person. Result: no better than guessing on the unseen people (52%, with rounds ranging from 20% to 90% because ten people is a tiny test), while the same models score 84% (probe) and 64% (zero-shot) on the people they were trained on. That gap is overfitting made visible: with 40 training people from one site the model learns who is who, and nothing it learns carries over to new people. The training signal itself now behaves (the picture-to-report error fell steadily in every round), so this is a sample-size limit, not a broken model. The run took about 15 minutes per round on the laptop when it was awake.
 
 **This week: a "does the machinery work?" check for pipeline B.** Before spending days of cluster time, we took 10 people from one site (5 autistic, 5 controls) and asked the model to learn them by heart. A model that cannot even memorise ten people it has seen has a broken pipeline, not a hard problem. The check passed: after a few hundred training steps the model classified all 10 correctly and 89% of their individual pictures; every component of the training signal fell below its "random guessing" level; and the saved model, reloaded from disk and given records with the diagnosis blanked out, produced exactly the same predictions. The notebook (`notebooks/pitt10_pipeline_check.ipynb`) also displays everything the model receives, pictures and text, so that nothing is hidden.
 
@@ -33,7 +33,7 @@ ABIDE is a public dataset of resting-state fMRI scans from 871 people at 20 site
 
 ## Next steps
 
-1. **Run pipeline B at real scale on the Yale cluster**: all 50 PITT participants with proper cross-validation, then all 20 sites, with longer training and the larger picture model. This is the first real test of whether single-instant pictures carry diagnostic information.
+1. **Run pipeline B at real scale on the Yale cluster**: all 20 sites (871 people), with longer training and the larger picture model. PITT alone showed only overfitting; whether single-instant pictures carry any diagnostic signal needs the full sample.
 2. **Compare the two pipelines fairly**, on the same people and the same splits, including the leave-one-site-out test that matters clinically.
 3. **Give the text half more to work with.** The reports are templated, so once personal details are hidden most of them read the same. Hiding less, or adding more clinical fields, should help the model learn the picture-to-text link, which was the slowest part of training.
 4. **Return to the biology.** For pipeline A, find which region pairs carry the most weight in the classifier and check whether they match networks reported in the autism literature.
