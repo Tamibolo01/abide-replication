@@ -1,7 +1,7 @@
 """Shared synthetic fixtures for the test suite.
 
 No network, no reads of data/ or results/, and every random draw is seeded,
-so the suite runs anywhere in seconds (see CLAUDE.md). The sizes are tiny on
+so the suite runs anywhere in seconds. The sizes are tiny on
 purpose. ``targets`` gives 2 sites x 2 labels x 6 subjects, so every site|label
 stratum has at least n_splits=3 members and StratifiedKFold never warns.
 """

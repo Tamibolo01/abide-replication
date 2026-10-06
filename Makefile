@@ -1,4 +1,4 @@
-# Development commands. `make check` is the gate every change must pass (see CLAUDE.md).
+# Development commands. `make check` is the gate every change must pass.
 # Uses the project venv when present, else the active `python` (the cluster's conda env).
 PY ?= $(if $(wildcard venv/bin/python),venv/bin/python,python)
 

@@ -1,5 +1,5 @@
 # Tool configuration only: src/ is a set of flat scripts, not an installable package.
-# `make check` runs everything below (see CLAUDE.md).
+# `make check` runs everything below.
 
 [tool.ruff]
 line-length = 120

@@ -62,7 +62,6 @@ tests/              # fast tests on synthetic data, run by `make check`
 notebooks/          # pitt10_pipeline_check.ipynb: does the VLM pipeline fit 10 PITT participants?
 requirements.txt    # pinned package versions
 requirements-dev.txt  # plus ruff and pytest, for `make check`
-CLAUDE.md           # working rules: quality gates, testing, scientific practice
 ```
 
 ## Setup
@@ -81,9 +80,8 @@ Every change goes through `make check` (ruff lint, format check, and the
 test suite in `tests/`, about 15 s on synthetic data) before it is committed
 or its results are reported. `make dev` installs the tools, `make format`
 fixes formatting, and `make smoke` runs the one-minute PITT+OLIN experiment
-on cached data to confirm that results are unchanged. The rules, including
-the scientific ones, are in [CLAUDE.md](CLAUDE.md). Notebooks run headlessly, outputs
-included, with `venv/bin/python notebooks/run_notebook.py notebooks/<name>.ipynb`.
+on cached data to confirm that results are unchanged. Notebooks run headlessly,
+outputs included, with `venv/bin/python notebooks/run_notebook.py notebooks/<name>.ipynb`.
 
 ## Running
 
@@ -307,7 +305,7 @@ matter for the next, larger run:
 The same 50 PITT subjects and 5-fold stratified CV (seed 0), scored on
 held-out subjects only, with `--eval-train` reporting each fold's training
 subjects as well so that overfitting is measured rather than hidden. Run with
-the code of commit 09bae66 (the `--eval-train` change, before it was
+the code of commit 89ebda3 (the `--eval-train` change, before it was
 committed); about 15-20 minutes per fold on the M1 Pro when the machine is
 otherwise idle.
 
