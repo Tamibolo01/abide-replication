@@ -55,7 +55,11 @@ Architecture
 
 Losses (equation numbers as in the paper)
 -----------------------------------------
-- L_VV (eq. 1): symmetric InfoNCE between the two views, temperature tau_vv.
+- L_VV (eq. 1): symmetric InfoNCE between the two views, temperature tau_vv,
+  computed on the shared-space projections. MaMA's code instead puts a
+  separate two-layer SimCLR head on the raw encoder features and uses
+  NT-Xent at temperature 0.5, so their multi-view term shapes the encoder
+  without pulling the CLIP embedding directly.
 - L_VT (eq. 2): symmetric CLIP loss between a view and the report, with a
   learnable temperature (CLIP's logit scale).
 - L_local (eq. 3): with C the S x P cosine-similarity matrix between the S
@@ -65,8 +69,15 @@ Losses (equation numbers as in the paper)
   the best-matching sentence; each scalar score enters a symmetric InfoNCE
   over the batch (temperature tau_local) and the two are averaged.
 - Total (eq. 4): L_VV + L_VT(v, t) + L_VT(v~, t) + w * L_local, with w = 0
-  during the first part of training (MaMA: 8k of 40k steps) and 1 after.
-  L_local is computed for both views and averaged.
+  for the first ``local_start_frac`` of training and 1 after. L_local is
+  computed for both views and averaged.
+
+  Note, we follow the paper here, not MaMA's released code. In their
+  model.py the SimCLR term and the second-view CLIP term sit behind the
+  same late-loss gate as L_local, so for the first 8k of 40k steps MaMA is
+  plain CLIP on a single view. Here L_VV and L_VT(v~, t) are active from
+  step 0 and only L_local is delayed, which is what eq. 4 describes. To
+  match the released code instead, gate all three on ``local_start``.
 
 Training follows MaMA's recipe scaled down: AdamW, lr 4e-5, weight decay
 0.1, cosine schedule with warm-up, gradient clipping; bfloat16 autocast on
